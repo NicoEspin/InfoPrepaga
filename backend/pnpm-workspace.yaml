@@ -1,0 +1,10 @@
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma
+  - bcrypt
+  - sharp
+  - unrs-resolver
+autoInstallPeers: false
+strictPeerDependencies: true

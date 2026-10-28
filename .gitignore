@@ -1,0 +1,17 @@
+.starter-baseline/
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+.starter-tools/
+.pnpm-store/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+audit-current.json
+*.pem
+*.key
+.DS_Store
+.idea/
