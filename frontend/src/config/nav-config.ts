@@ -35,8 +35,71 @@ import { NavGroup } from '@/types';
  */
 export const navGroups: NavGroup[] = [
   {
+    label: 'InfoPrepaga',
+    items: [
+      { title: 'Leads', url: '/leads', icon: 'user', items: [] },
+      {
+        title: 'Pipeline',
+        url: '/pipeline',
+        icon: 'kanban',
+        items: []
+      },
+      {
+        title: 'Reportes',
+        url: '/reports',
+        icon: 'dashboard',
+        items: [],
+        access: { role: 'ADMIN' }
+      },
+      { title: 'Seguimientos', url: '/followups', icon: 'calendar', items: [] },
+      {
+        title: 'Avalian · Vista previa',
+        url: '/avalian',
+        icon: 'lock',
+        items: [],
+        access: { role: 'ADMIN' }
+      },
+      {
+        title: 'Administrador',
+        url: '/settings',
+        icon: 'user',
+        items: [],
+        access: { role: 'ADMIN' }
+      }
+    ]
+  }
+];
+
+// Navegación del starter conservada para futuras funcionalidades (chat, IA, etc.).
+/*
+export const navGroups: NavGroup[] = [
+  {
     label: 'Overview',
     items: [
+      {
+        title: 'Leads · Vista previa',
+        url: '/leads',
+        icon: 'user',
+        items: []
+      },
+      {
+        title: 'Pipeline',
+        url: '/pipeline',
+        icon: 'kanban',
+        items: []
+      },
+      {
+        title: 'Seguimientos · Vista previa',
+        url: '/followups',
+        icon: 'calendar',
+        items: []
+      },
+      {
+        title: 'Avalian · Vista previa',
+        url: '/avalian',
+        icon: 'lock',
+        items: []
+      },
       {
         title: 'Dashboard',
         url: '/dashboard/overview',
@@ -163,3 +226,5 @@ export const navGroups: NavGroup[] = [
     ]
   }
 ];
+
+*/

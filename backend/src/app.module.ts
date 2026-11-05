@@ -15,6 +15,8 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RolesModule } from './roles/roles.module';
 import { UsersModule } from './users/users.module';
+import { ReportsModule } from './reports/reports.module';
+import { CrmModule } from './crm/crm.module';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { UsersModule } from './users/users.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    CrmModule,
+    ReportsModule,
     RolesModule,
     PermissionsModule,
   ],

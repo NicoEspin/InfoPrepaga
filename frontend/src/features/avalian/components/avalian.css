@@ -1,0 +1,591 @@
+.avalian-content {
+  padding: 20px 24px;
+  background: var(--muted);
+  min-height: calc(100svh - 62px);
+}
+.avalian-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.avalian-breadcrumb svg {
+  width: 15px;
+  height: 15px;
+}
+.avalian-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: stretch;
+}
+.avalian-main-column {
+  min-width: 0;
+}
+.avalian-main-column .leads-heading h1 {
+  font-size: 34px;
+}
+.avalian-main-column .leads-heading p {
+  font-size: 15px;
+}
+.avalian-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 13px;
+  margin-bottom: 15px;
+}
+.avalian-metric {
+  --card-spacing: 20px;
+  position: relative;
+  gap: 8px;
+  padding-left: 71px;
+  min-height: 123px;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+.avalian-metric [data-slot='card-header'],
+.avalian-metric [data-slot='card-content'] {
+  padding-left: 15px;
+  padding-right: 10px;
+}
+.avalian-metric [data-slot='card-title'] {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.avalian-metric strong {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.8px;
+  line-height: 1.15;
+}
+.avalian-metric strong.avalian-date-metric {
+  font-size: clamp(18px, 1.5vw, 25px);
+  letter-spacing: -0.7px;
+}
+.avalian-metric strong > svg {
+  width: 18px;
+  height: 18px;
+  color: color-mix(in oklab, var(--chart-1) 65%, var(--foreground));
+}
+.avalian-metric p,
+.avalian-metric [data-slot='card-content'] > button {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+}
+.avalian-metric [data-slot='card-content'] > button {
+  cursor: pointer;
+}
+.avalian-metric [data-slot='card-content'] > button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.avalian-metric-icon,
+.avalian-import-icon {
+  position: absolute;
+  top: 21px;
+  left: 18px;
+  display: grid;
+  place-items: center;
+  width: 51px;
+  height: 51px;
+  border-radius: 50%;
+  background: var(--muted);
+  color: color-mix(in oklab, var(--primary) 65%, var(--foreground));
+}
+.avalian-metric-icon svg,
+.avalian-import-icon svg {
+  width: 27px;
+  height: 27px;
+  stroke-width: 1.8;
+}
+.avalian-metric[data-tone='review'] .avalian-metric-icon {
+  color: color-mix(in oklab, var(--chart-1) 65%, var(--foreground));
+  background: color-mix(in oklab, var(--chart-1) 10%, var(--card));
+}
+.avalian-table-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  overflow: hidden;
+}
+.avalian-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+}
+.avalian-table-toolbar h2 {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.4px;
+}
+.avalian-table-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.avalian-search {
+  width: 330px;
+  height: 35px;
+}
+.avalian-search input {
+  font-size: 12px;
+}
+.avalian-table-toolbar button {
+  height: 35px;
+  font-size: 12px;
+}
+.avalian-filters {
+  display: flex;
+  flex-direction: row;
+  gap: 14px;
+  align-items: flex-end;
+  padding: 5px 18px 16px;
+  background: var(--background);
+}
+.avalian-filters > [data-slot='field'] {
+  max-width: 230px;
+}
+.avalian-filters [data-slot='field-label'] {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-filters [data-slot='native-select-wrapper'] {
+  width: 100%;
+}
+.avalian-filters select {
+  font-size: 12px;
+}
+.avalian-filters button {
+  font-size: 12px;
+}
+.avalian-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 18px;
+  background: var(--muted);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-table-panel table {
+  min-width: 940px;
+}
+.avalian-table-panel th {
+  height: 36px;
+  padding: 7px 14px;
+  background: linear-gradient(var(--muted), var(--muted));
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-sort {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.avalian-sort svg {
+  width: 12px;
+  height: 12px;
+}
+.avalian-table-panel [aria-sort='ascending'] svg,
+.avalian-table-panel [aria-sort='descending'] svg {
+  color: var(--primary);
+}
+.avalian-table-panel td {
+  height: 39px;
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-record-name {
+  color: var(--foreground);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.avalian-record-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.avalian-sort:focus-visible,
+.avalian-record-name:focus-visible,
+.avalian-metric button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.avalian-record-status {
+  height: 25px;
+  font-size: 12px;
+  font-weight: 500;
+  padding-inline: 11px;
+}
+.avalian-record-status[data-status='Válido'] {
+  background: var(--muted);
+  color: color-mix(in oklab, var(--primary) 65%, var(--foreground));
+}
+.avalian-record-status[data-status='En revisión'] {
+  background: color-mix(in oklab, var(--chart-1) 10%, var(--card));
+  color: color-mix(in oklab, var(--chart-1) 65%, var(--foreground));
+}
+.avalian-record-status[data-status='Inválido'] {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.avalian-table-panel .avalian-observations {
+  max-width: 240px;
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.avalian-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 59px;
+  padding: 13px 18px;
+  border-top: 1px solid var(--border);
+}
+.avalian-pagination p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-pagination nav {
+  display: flex;
+  gap: 5px;
+}
+.avalian-pagination [aria-current='page'] {
+  background: var(--muted);
+  color: color-mix(in oklab, var(--primary) 65%, var(--foreground));
+}
+.avalian-import-panel {
+  --card-spacing: 20px;
+  position: relative;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+.avalian-import-panel [data-slot='card-header'] {
+  padding-left: 88px;
+  padding-top: 7px;
+  min-height: 102px;
+}
+.avalian-import-panel [data-slot='card-title'] {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+}
+.avalian-import-panel [data-slot='card-description'] {
+  font-size: 12px;
+  line-height: 1.7;
+  padding-top: 5px;
+}
+.avalian-import-panel [data-slot='card-content'] {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.avalian-import-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.avalian-import-info > svg {
+  width: 17px;
+  height: 17px;
+  margin-top: 3px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.avalian-import-info > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.avalian-import-info span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-import-info strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.avalian-import-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 15px 12px;
+  background: var(--muted);
+  border-radius: var(--radius);
+}
+.avalian-import-state > svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.avalian-import-state strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--primary) 65%, var(--foreground));
+}
+.avalian-import-state p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+  margin-top: 5px;
+}
+.avalian-import-panel .avalian-import-button {
+  width: 100%;
+  height: 44px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 12px;
+}
+.avalian-import-panel .avalian-import-button:hover {
+  background: var(--primary);
+}
+.avalian-import-panel .avalian-import-caption {
+  margin-top: -12px;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+.avalian-import-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 2px;
+}
+.avalian-import-help > svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+.avalian-import-help p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted-foreground);
+}
+.avalian-feedback {
+  min-height: 18px;
+  font-size: 12px;
+  color: color-mix(in oklab, var(--primary) 65%, var(--foreground));
+  margin-top: 12px;
+}
+.avalian-detail-dialog[data-slot='dialog-content'] {
+  max-width: min(530px, calc(100vw - 24px));
+  max-height: 88svh;
+  overflow-y: auto;
+}
+.avalian-import-dialog[data-slot='dialog-content'] {
+  max-width: min(720px, calc(100vw - 24px));
+  max-height: 88svh;
+  overflow-y: auto;
+}
+.avalian-detail-dialog [data-slot='dialog-header'],
+.avalian-import-dialog [data-slot='dialog-header'] {
+  padding-right: 25px;
+}
+.avalian-detail-fields > div {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 15px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.avalian-detail-fields dt {
+  color: var(--muted-foreground);
+}
+.avalian-detail-fields dd {
+  overflow-wrap: anywhere;
+}
+.avalian-batch-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.avalian-batch-history article {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.avalian-batch-history strong {
+  font-size: 13px;
+}
+.avalian-batch-history span,
+.avalian-batch-history p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.avalian-import-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+.avalian-import-summary strong {
+  font-size: 13px;
+}
+.avalian-import-summary span,
+.avalian-import-note {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+}
+.avalian-import-dialog table {
+  min-width: 490px;
+}
+.avalian-import-dialog th,
+.avalian-import-dialog td {
+  font-size: 12px;
+}
+.avalian-import-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+@media (max-width: 1350px) {
+  .avalian-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .avalian-import-panel {
+    max-width: 620px;
+  }
+  .avalian-metric strong.avalian-date-metric {
+    font-size: 25px;
+  }
+}
+@media (max-width: 850px) {
+  .avalian-table-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .avalian-table-toolbar > div {
+    width: 100%;
+  }
+  .avalian-search {
+    flex: 1;
+    width: auto;
+  }
+  .avalian-metric {
+    padding-left: 0;
+    --card-spacing: 16px;
+  }
+  .avalian-metric-icon {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .avalian-content {
+    padding: 22px 14px;
+  }
+  .avalian-main-column .leads-heading h1 {
+    font-size: 29px;
+  }
+  .avalian-main-column .leads-heading p {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .avalian-metrics {
+    gap: 7px;
+  }
+  .avalian-metric {
+    --card-spacing: 12px;
+    min-height: 120px;
+    gap: 6px;
+  }
+  .avalian-metric [data-slot='card-title'] {
+    font-size: 12px;
+    min-height: 29px;
+  }
+  .avalian-metric [data-slot='card-header'],
+  .avalian-metric [data-slot='card-content'] {
+    padding-inline: 9px;
+  }
+  .avalian-metric strong {
+    font-size: 27px;
+  }
+  .avalian-metric strong.avalian-date-metric {
+    font-size: 14px;
+    letter-spacing: -0.5px;
+  }
+  .avalian-metric p,
+  .avalian-metric [data-slot='card-content'] > button {
+    font-size: 12px;
+  }
+  .avalian-metric strong > svg {
+    width: 14px;
+    height: 14px;
+  }
+  .avalian-table-toolbar {
+    padding: 12px;
+  }
+  .avalian-table-toolbar h2 {
+    font-size: 16px;
+  }
+  .avalian-table-toolbar button {
+    font-size: 12px;
+  }
+  .avalian-search input {
+    font-size: 12px;
+  }
+  .avalian-filters {
+    flex-direction: column;
+    align-items: stretch;
+    padding-inline: 12px;
+  }
+  .avalian-filters > [data-slot='field'] {
+    max-width: none;
+  }
+  .avalian-pagination {
+    padding: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+  }
+  .avalian-pagination p {
+    font-size: 12px;
+  }
+  .avalian-import-panel [data-slot='card-header'] {
+    min-height: 100px;
+  }
+  .avalian-detail-fields > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

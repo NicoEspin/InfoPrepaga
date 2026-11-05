@@ -6,7 +6,9 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { UsersService } from '../users/users.service';
+import { AccountsService } from '../users/accounts.service';
+import { lockAccounts } from '../users/account-lock';
+import { UsersService, userInclude } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './types/jwt-payload.type';
@@ -16,6 +18,7 @@ import { Prisma } from '@prisma/client';
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
+    private readonly accounts: AccountsService,
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -23,71 +26,89 @@ export class AuthService {
 
   async register(dto: RegisterDto, actor: AuthenticatedUser) {
     assertAdmin(actor);
-    const user = await this.usersService.create(dto);
-    const tokens = await this.issueTokens(user.id, user.email);
-
-    return {
-      user: this.usersService.toSafeUser(user),
-      ...tokens,
-    };
+    const created = await this.accounts.create(
+      {
+        ...dto,
+        firstName: dto.firstName?.trim() || 'Vendedor',
+        role: 'VENDEDOR',
+      },
+      actor,
+    );
+    return this.prisma.$transaction(async (tx) => {
+      await lockAccounts(tx);
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: created.id },
+        include: userInclude,
+      });
+      if (!user.isActive || user.deletedAt)
+        throw new UnauthorizedException('Invalid credentials');
+      return {
+        user: this.usersService.toSafeUser(user),
+        ...(await this.issueTokens(user.id, user.email, tx)),
+      };
+    });
   }
 
   async login(dto: LoginDto) {
-    const user = await this.usersService.findByEmail(dto.email);
-
-    if (!user || !user.isActive) {
+    // Hashing outside the lock avoids serializing costly password comparisons.
+    const checked = await this.usersService.findByEmail(
+      dto.email.trim().toLowerCase(),
+    );
+    if (
+      !checked ||
+      !checked.isActive ||
+      checked.deletedAt ||
+      !(await bcrypt.compare(dto.password, checked.password))
+    )
       throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const passwordMatches = await bcrypt.compare(dto.password, user.password);
-    if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const tokens = await this.issueTokens(user.id, user.email);
-
-    return {
-      user: this.usersService.toSafeUser(user),
-      ...tokens,
-    };
+    return this.prisma.$transaction(async (tx) => {
+      await lockAccounts(tx);
+      const user = await tx.user.findUnique({
+        where: { id: checked.id },
+        include: userInclude,
+      });
+      if (
+        !user ||
+        !user.isActive ||
+        user.deletedAt ||
+        user.password !== checked.password ||
+        user.email !== checked.email
+      )
+        throw new UnauthorizedException('Invalid credentials');
+      return {
+        user: this.usersService.toSafeUser(user),
+        ...(await this.issueTokens(user.id, user.email, tx)),
+      };
+    });
   }
 
   async refresh(refreshToken: string) {
-    const tokenHash = this.hashToken(refreshToken);
-    const storedToken = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
-      include: { user: true },
-    });
-
-    if (!storedToken || storedToken.expiresAt < new Date()) {
-      if (storedToken) {
-        await this.prisma.refreshToken.delete({
-          where: { id: storedToken.id },
-        });
-      }
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (!storedToken.user.isActive) {
-      throw new UnauthorizedException('User account is inactive');
-    }
-
     return this.prisma.$transaction(async (tx) => {
-      // Claim the token once, even when refresh requests race.
-      const claimed = await tx.refreshToken.deleteMany({
-        where: { id: storedToken.id, expiresAt: { gt: new Date() } },
+      await lockAccounts(tx);
+      const stored = await tx.refreshToken.findUnique({
+        where: { tokenHash: this.hashToken(refreshToken) },
+        include: { user: true },
       });
-      if (claimed.count !== 1) {
+      if (
+        !stored ||
+        stored.expiresAt <= new Date() ||
+        !stored.user.isActive ||
+        stored.user.deletedAt
+      )
         throw new UnauthorizedException('Invalid refresh token');
-      }
-      return this.issueTokens(storedToken.user.id, storedToken.user.email, tx);
+      await tx.refreshToken.delete({ where: { id: stored.id } });
+      return this.issueTokens(stored.user.id, stored.user.email, tx);
     });
   }
 
   async logout(refreshToken: string) {
-    const tokenHash = this.hashToken(refreshToken);
-    await this.prisma.refreshToken.deleteMany({ where: { tokenHash } });
-    return { message: 'Logged out successfully' };
+    return this.prisma.$transaction(async (tx) => {
+      await lockAccounts(tx);
+      await tx.refreshToken.deleteMany({
+        where: { tokenHash: this.hashToken(refreshToken) },
+      });
+      return { message: 'Logged out successfully' };
+    });
   }
 
   private async issueTokens(

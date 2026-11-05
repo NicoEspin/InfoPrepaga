@@ -8,7 +8,9 @@ export function proxy(request: NextRequest) {
   ) {
     return new NextResponse('Demo deshabilitada', { status: 404 });
   }
-  return NextResponse.next();
+  const headers = new Headers(request.headers);
+  headers.set('x-ip-path', request.nextUrl.pathname + request.nextUrl.search);
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = {

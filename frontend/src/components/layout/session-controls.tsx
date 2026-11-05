@@ -1,16 +1,20 @@
 'use client';
 
+import { withSessionLock } from '@/lib/session-client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function SessionControls() {
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   async function logout() {
     setPending(true);
     try {
-      const response = await fetch('/api/auth/logout', { method: 'POST' });
+      const response = await withSessionLock(() => fetch('/api/auth/logout', { method: 'POST' }));
       if (!response.ok) throw new Error('Logout failed');
+      queryClient.clear();
       window.location.assign('/auth/sign-in');
     } catch {
       setError('No se pudo cerrar la sesión. Intentá nuevamente.');

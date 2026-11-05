@@ -11,11 +11,12 @@ import {
 export class RegisterDto {
   @ApiProperty({ example: 'jane@example.com' })
   @IsEmail()
+  @MaxLength(254)
   email!: string;
 
-  @ApiProperty({ example: 'StrongPass123!', minLength: 8 })
+  @ApiProperty({ example: 'StrongPass123!', minLength: 12 })
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
   @MaxLength(72)
   @IsByteLength(0, 72)
   password!: string;

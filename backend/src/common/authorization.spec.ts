@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccountsService } from '../users/accounts.service';
 import { UsersService } from '../users/users.service';
 import { RolesService } from '../roles/roles.service';
 import { PermissionsService } from '../permissions/permissions.service';
@@ -25,7 +26,11 @@ describe('Administrative service boundaries', () => {
     [
       'assign roles',
       () =>
-        users.assignRoles('another-user', { roleIds: ['admin-role'] }, vendor),
+        new AccountsService(db).change(
+          'another-user',
+          { version: 1, role: 'ADMIN' },
+          vendor,
+        ),
     ],
     ['list roles', () => roles.findAll(vendor)],
     ['create a role', () => roles.create({ name: 'ADMIN' }, vendor)],

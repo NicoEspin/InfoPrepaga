@@ -10,6 +10,12 @@ type BreadcrumbItem = {
 
 // This allows to add custom title as well
 const routeMapping: Record<string, BreadcrumbItem[]> = {
+  '/settings': [{ title: 'Administrador', link: '/settings' }],
+  '/leads': [{ title: 'Leads', link: '/leads' }],
+  '/pipeline': [{ title: 'Pipeline', link: '/pipeline' }],
+  '/reports': [{ title: 'Reportes', link: '/reports' }],
+  '/followups': [{ title: 'Seguimientos', link: '/followups' }],
+  '/avalian': [{ title: 'Avalian', link: '/avalian' }],
   '/dashboard': [{ title: 'Dashboard', link: '/dashboard' }],
   '/dashboard/employee': [
     { title: 'Dashboard', link: '/dashboard' },

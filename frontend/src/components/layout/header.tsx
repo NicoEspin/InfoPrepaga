@@ -5,8 +5,8 @@ import { Breadcrumbs } from '../breadcrumbs';
 import SearchInput from '../search-input';
 import { ThemeSelector } from '../themes/theme-selector';
 import { ThemeModeToggle } from '../themes/theme-mode-toggle';
-import CtaGithub from './cta-github';
-import { NotificationCenter } from '@/features/notifications/components/notification-center';
+// import CtaGithub from './cta-github';
+// import { NotificationCenter } from '@/features/notifications/components/notification-center';
 
 export default function Header() {
   return (
@@ -18,15 +18,13 @@ export default function Header() {
       </div>
 
       <div className='flex items-center gap-2 px-4'>
-        <CtaGithub />
+        {/* Accesos del starter conservados para reutilización: <CtaGithub /> */}
         <div className='hidden md:flex'>
           <SearchInput />
         </div>
         <ThemeModeToggle />
-        <div className='hidden sm:block'>
-          <ThemeSelector />
-        </div>
-        <NotificationCenter />
+        <ThemeSelector />
+        {/* <NotificationCenter /> */}
       </div>
     </header>
   );

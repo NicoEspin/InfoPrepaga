@@ -1,6 +1,6 @@
 import 'server-only';
 import { cache } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { backendFetch } from './backend';
 
@@ -22,6 +22,10 @@ export const getSession = cache(async () => {
 
 export async function requireSession() {
   const user = await getSession();
-  if (!user) redirect('/auth/sign-in');
+  if (!user) {
+    const refresh = (await cookies()).get('ip_refresh')?.value;
+    const path = (await headers()).get('x-ip-path') ?? '/leads';
+    redirect(refresh ? `/auth/restore?returnTo=${encodeURIComponent(path)}` : '/auth/sign-in');
+  }
   return user;
 }

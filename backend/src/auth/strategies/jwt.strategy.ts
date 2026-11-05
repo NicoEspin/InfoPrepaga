@@ -38,7 +38,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
     const user = await this.usersService.findIdentityById(payload.sub);
 
-    if (!user.isActive) {
+    if (!user.isActive || user.deletedAt) {
       throw new UnauthorizedException('User account is inactive');
     }
 

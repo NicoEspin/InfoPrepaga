@@ -1,6 +1,14 @@
 import * as Joi from 'joi';
 
 export const envValidationSchema = Joi.object({
+  R2_ACCOUNT_ID: Joi.string()
+    .pattern(/^[a-f0-9]{32}$/)
+    .allow(''),
+  R2_ACCESS_KEY_ID: Joi.string().allow(''),
+  R2_SECRET_ACCESS_KEY: Joi.string().allow(''),
+  R2_BUCKET_NAME: Joi.string()
+    .pattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/)
+    .allow(''),
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
     .default('development'),

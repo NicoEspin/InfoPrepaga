@@ -5,6 +5,6 @@ export function backendFetch(path: string, init: RequestInit = {}) {
   return fetch(new URL(path, origin), {
     ...init,
     cache: 'no-store',
-    signal: AbortSignal.timeout(10000)
+    signal: init.signal ?? AbortSignal.timeout(10000)
   });
 }

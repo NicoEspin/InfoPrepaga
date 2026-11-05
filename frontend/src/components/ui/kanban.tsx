@@ -297,7 +297,8 @@ function Kanban<T>(props: KanbanProps<T>) {
     (event: DragStartEvent) => {
       kanbanProps.onDragStart?.(event);
 
-      if (event.activatorEvent.defaultPrevented) return;
+      // KeyboardSensor prevents the activation key's default browser behavior.
+      if (event.activatorEvent.defaultPrevented && event.activatorEvent.type !== 'keydown') return;
       setActiveId(event.active.id);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- kanbanProps is unstable object ref, using specific prop
@@ -308,7 +309,7 @@ function Kanban<T>(props: KanbanProps<T>) {
     (event: DragOverEvent) => {
       kanbanProps.onDragOver?.(event);
 
-      if (event.activatorEvent.defaultPrevented) return;
+      if (event.activatorEvent.defaultPrevented && event.activatorEvent.type !== 'keydown') return;
 
       const { active, over } = event;
       if (!over) return;
@@ -361,7 +362,7 @@ function Kanban<T>(props: KanbanProps<T>) {
     (event: DragEndEvent) => {
       kanbanProps.onDragEnd?.(event);
 
-      if (event.activatorEvent.defaultPrevented) return;
+      if (event.activatorEvent.defaultPrevented && event.activatorEvent.type !== 'keydown') return;
 
       const { active, over } = event;
 
@@ -438,7 +439,7 @@ function Kanban<T>(props: KanbanProps<T>) {
     (event: DragCancelEvent) => {
       kanbanProps.onDragCancel?.(event);
 
-      if (event.activatorEvent.defaultPrevented) return;
+      if (event.activatorEvent.defaultPrevented && event.activatorEvent.type !== 'keydown') return;
 
       setActiveId(null);
       hasMovedRef.current = false;

@@ -8,16 +8,30 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
+  id            String            @id @default(uuid())
+  email         String            @unique
   password      String
   firstName     String?
   lastName      String?
-  isActive      Boolean        @default(true)
+  isActive      Boolean           @default(true)
   roles         UserRole[]
   refreshTokens RefreshToken[]
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  deletedAt     DateTime?
+  version       Int               @default(1)
+  receivesLeads Boolean           @default(false)
+  assignedLeads Lead[]
+  notes         LeadNote[]
+  tasks         CommercialTask[]  @relation("TaskOwner")
+  createdTasks  CommercialTask[]  @relation("TaskCreator")
+  activities    LeadActivity[]
+  leadImports   LeadImportBatch[]
+  commercialActions CommercialMovement[] @relation("MovementActor")
+  commercialSales CommercialMovement[] @relation("MovementResponsible")
+  commercialReports CommercialReport[]
+  accountActions AccountAudit[] @relation("AccountActor")
+  accountEvents AccountAudit[] @relation("AccountTarget")
 
   @@map("users")
 }
@@ -54,6 +68,7 @@ model UserRole {
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
+  @@unique([userId], map: "user_roles_one_role")
   @@map("user_roles")
 }
 
@@ -77,4 +92,261 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+enum LeadStatus {
+  NEW
+  NO_ANSWER
+  WHATSAPP
+  OVER_BUDGET
+  MEDICAL_PREEXISTENCE
+  RETIRED
+  PROSPECT
+  OTHER_INTEREST
+  ALREADY_CONTRACTED
+}
+
+enum TaskPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model LeadSource {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String   @unique
+  isBase    Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  movements CommercialMovement[]
+  entries Lead[] @relation("EntrySource")
+  leads     Lead[]
+  createdAt DateTime @default(now())
+
+  @@map("lead_sources")
+}
+
+model Lead {
+  id                 String           @id @default(uuid())
+  name               String
+  email              String?
+  phone              String?
+  company            String?
+  observations       String           @default("")
+  emailKey           String?
+  phoneKey           String?
+  contactKeysVersion Int              @default(1)
+  importData         Json?
+  importRow          LeadImportRow?
+  commercialStage    CommercialStage @default(NEW)
+  commercialStartedAt DateTime @default(now()) @db.Timestamptz(3)
+  entrySourceId      String?
+  entrySource LeadSource? @relation("EntrySource", fields: [entrySourceId], references: [id], onDelete: Restrict)
+  movements          CommercialMovement[]
+  status             LeadStatus       @default(NEW)
+  sourceId           String
+  source             LeadSource       @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  assignedToId       String?
+  assignedTo         User?            @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
+  version            Int              @default(1)
+  notes              LeadNote[]
+  activities         LeadActivity[]
+  tasks              CommercialTask[]
+  attachments        LeadAttachment[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([createdAt, entrySourceId], map: "reports_lead_creation")
+  @@index([assignedToId, createdAt, id])
+  @@index([status])
+  @@index([sourceId])
+  @@index([emailKey])
+  @@index([phoneKey])
+  @@map("leads")
+}
+
+model LeadImportBatch {
+  id          String          @id @default(uuid())
+  ownerId     String
+  owner       User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  fileName    String
+  sheets      String[]
+  warnings    String[]
+  version     Int             @default(1)
+  status      String          @default("REVIEW")
+  createdAt   DateTime        @default(now())
+  expiresAt   DateTime
+  completedAt DateTime?
+  total       Int
+  imported    Int             @default(0)
+  omitted     Int             @default(0)
+  rows        LeadImportRow[]
+
+  @@index([ownerId, createdAt])
+  @@index([expiresAt, status])
+  @@map("lead_import_batches")
+}
+
+model LeadImportRow {
+  id                 String          @id @default(uuid())
+  batchId            String
+  batch              LeadImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  sheet              String
+  rowNumber          Int
+  group              String
+  name               String
+  nameCandidates     String[]
+  nameResolved       Boolean
+  formulaFields      String[]
+  email              String
+  phone              String
+  observations       String
+  metadata           Json
+  advisor            String
+  sourceId           String?
+  assignedToId       String?
+  assignmentResolved Boolean         @default(false)
+  decision           String          @default("AUTO")
+  reviewedMatches    String[]
+  leadId             String?         @unique
+  lead               Lead?           @relation(fields: [leadId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, sheet, rowNumber])
+  @@index([batchId, sheet, rowNumber])
+  @@map("lead_import_rows")
+}
+
+model LeadNote {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@map("lead_notes")
+}
+
+model LeadActivity {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  kind      String
+  detail    Json
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt, id])
+  @@map("lead_activities")
+}
+
+model CommercialTask {
+  id          String       @id @default(uuid())
+  leadId      String?
+  lead        Lead?        @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  ownerId     String
+  owner       User         @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  createdById String?
+  createdBy   User?        @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  contact     String
+  title       String
+  priority    TaskPriority @default(MEDIUM)
+  dueAt       DateTime     @db.Timestamptz(3)
+  duration    Int          @default(60)
+  completedAt DateTime?    @db.Timestamptz(3)
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([ownerId, dueAt])
+  @@index([leadId, dueAt])
+  @@index([completedAt])
+  @@map("commercial_tasks")
+}
+
+model AssignmentState {
+  id              Int       @id
+  lastUserId      String?
+  lastUserCreated DateTime?
+
+  @@map("assignment_state")
+}
+
+model LeadAttachment {
+  id          String   @id @default(uuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  objectKey   String   @unique
+  name        String
+  contentType String
+  size        Int
+  state       String   @default("UPLOADING")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([leadId, createdAt, id])
+  @@map("lead_attachments")
+}
+
+model AccountAudit {
+  id        String   @id @default(uuid())
+  actorId   String
+  actor User @relation("AccountActor", fields: [actorId], references: [id], onDelete: Restrict)
+  targetId  String
+  target User @relation("AccountTarget", fields: [targetId], references: [id], onDelete: Restrict)
+  kind      String
+  detail    Json
+  createdAt DateTime @default(now())
+
+  @@index([targetId, createdAt], map: "account_audit_target")
+  @@map("account_audit")
+}
+
+enum CommercialStage {
+  NEW
+  CONTACTED
+  FOLLOW_UP
+  PROPOSAL
+  CLOSED
+}
+
+model CommercialMovement {
+  id String @id @default(uuid())
+  leadId String
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  from CommercialStage
+  to CommercialStage
+  effectiveAt DateTime @default(now()) @db.Timestamptz(3)
+  responsibleId String?
+  responsible User? @relation("MovementResponsible", fields: [responsibleId], references: [id], onDelete: Restrict)
+  sourceId String
+  source LeadSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  actorId String
+  actor User @relation("MovementActor", fields: [actorId], references: [id], onDelete: Restrict)
+  reason String?
+  leadVersion Int
+
+  @@unique([leadId, leadVersion])
+  @@index([leadId, effectiveAt, leadVersion])
+  @@index([to, effectiveAt, sourceId, responsibleId])
+  @@map("commercial_movements")
+}
+
+model CommercialReport {
+  id String @id @default(uuid())
+  name String
+  authorId String
+  author User @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  generatedAt DateTime @default(now()) @db.Timestamptz(3)
+  operationKey String
+  requestHash String
+  snapshot Json
+
+  @@unique([authorId, operationKey])
+  @@index([generatedAt, id])
+  @@map("commercial_reports")
 }

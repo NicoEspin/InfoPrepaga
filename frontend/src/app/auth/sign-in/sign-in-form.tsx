@@ -1,5 +1,6 @@
 'use client';
 
+import { restoreSession, withSessionLock } from '@/lib/session-client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -13,12 +14,12 @@ export function SignInForm() {
     setPending(true);
     setError('');
     try {
-      const response = await fetch('/api/auth/refresh', { method: 'POST' });
-      if (!response.ok) {
+      const restored = await restoreSession(true);
+      if (!restored) {
         setError('La sesión terminó. Ingresá tus credenciales.');
         return;
       }
-      window.location.assign('/dashboard/overview');
+      window.location.assign('/leads');
     } catch {
       setError('El servidor no está disponible');
     } finally {
@@ -31,17 +32,19 @@ export function SignInForm() {
     setError('');
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.get('email'), password: form.get('password') })
-      });
+      const response = await withSessionLock(() =>
+        fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: form.get('email'), password: form.get('password') })
+        })
+      );
       if (!response.ok) {
         const data = (await response.json()) as { message: string };
         setError(data.message);
         return;
       }
-      window.location.assign('/dashboard/overview');
+      window.location.assign('/leads');
     } catch {
       setError('No se pudo conectar con el servidor. Intentá nuevamente.');
     } finally {
@@ -51,8 +54,8 @@ export function SignInForm() {
   return (
     <Card className='w-full max-w-sm'>
       <CardHeader>
-        <CardTitle>Ingresar al entorno de pruebas</CardTitle>
-        <CardDescription>InfoPrepaga · Plantillas con datos sintéticos</CardDescription>
+        <CardTitle>Ingresar a InfoPrepaga</CardTitle>
+        <CardDescription>CRM privado · Usá tu cuenta autorizada</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit}>

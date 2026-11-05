@@ -5,7 +5,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import RenderResults from './render-result';
-import useThemeSwitching from './use-theme-switching';
+// import useThemeSwitching from './use-theme-switching';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 
 export default function KBar({ children }: { children: React.ReactNode }) {
@@ -30,8 +30,8 @@ export default function KBar({ children }: { children: React.ReactNode }) {
               name: navItem.title,
               shortcut: navItem.shortcut,
               keywords: navItem.title.toLowerCase(),
-              section: 'Navigation',
-              subtitle: `Go to ${navItem.title}`,
+              section: 'Navegación',
+              subtitle: `Ir a ${navItem.title}`,
               perform: () => navigateTo(navItem.url)
             }
           : null;
@@ -44,7 +44,7 @@ export default function KBar({ children }: { children: React.ReactNode }) {
           shortcut: childItem.shortcut,
           keywords: childItem.title.toLowerCase(),
           section: navItem.title,
-          subtitle: `Go to ${childItem.title}`,
+          subtitle: `Ir a ${childItem.title}`,
           perform: () => navigateTo(childItem.url)
         })) ?? [];
 
@@ -60,7 +60,7 @@ export default function KBar({ children }: { children: React.ReactNode }) {
   );
 }
 const KBarComponent = ({ children }: { children: React.ReactNode }) => {
-  useThemeSwitching();
+  // useThemeSwitching(); // Selector de temas del starter reservado para desarrollo.
 
   return (
     <>
@@ -76,13 +76,13 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
             <div className='text-muted-foreground flex items-center gap-3 border-t px-3 py-2 text-xs'>
               <span className='flex items-center gap-1'>
                 <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd> navigate
+                <Kbd>↓</Kbd> navegar
               </span>
               <span className='flex items-center gap-1'>
-                <Kbd>↵</Kbd> open
+                <Kbd>↵</Kbd> abrir
               </span>
               <span className='flex items-center gap-1'>
-                <Kbd>esc</Kbd> close
+                <Kbd>esc</Kbd> cerrar
               </span>
             </div>
           </KBarAnimator>

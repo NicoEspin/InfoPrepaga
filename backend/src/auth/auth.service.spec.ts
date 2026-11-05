@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccountsService } from '../users/accounts.service';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 
@@ -16,7 +17,11 @@ describe('AuthService', () => {
     toSafeUser: jest.fn(),
   };
 
+  const accounts = { create: jest.fn() };
   const prisma = {
+    $transaction: jest.fn(),
+    $queryRaw: jest.fn(),
+    user: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn() },
     refreshToken: {
       create: jest.fn(),
       findUnique: jest.fn(),
@@ -43,10 +48,15 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: unknown) => unknown) => callback(prisma),
+    );
+    prisma.$queryRaw.mockResolvedValue([{ id: 1 }]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
+        { provide: AccountsService, useValue: accounts },
         { provide: UsersService, useValue: usersService },
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwtService },
@@ -69,7 +79,8 @@ describe('AuthService', () => {
       roles: [],
     };
 
-    usersService.create.mockResolvedValue(user);
+    accounts.create.mockResolvedValue(user);
+    prisma.user.findUniqueOrThrow.mockResolvedValue(user);
     usersService.toSafeUser.mockReturnValue({
       id: user.id,
       email: user.email,
@@ -119,6 +130,7 @@ describe('AuthService', () => {
     };
 
     usersService.findByEmail.mockResolvedValue(user);
+    prisma.user.findUnique.mockResolvedValue(user);
     usersService.toSafeUser.mockReturnValue({
       id: user.id,
       email: user.email,

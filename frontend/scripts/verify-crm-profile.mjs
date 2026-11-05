@@ -1,0 +1,83 @@
+import { sessionModule } from './session-module.mjs';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { stripTypeScriptTypes } from 'node:module';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { createActionRunner } from '../src/features/crm/actions.ts';
+
+let source = stripTypeScriptTypes(await readFile(new URL('../src/features/crm/api.ts', import.meta.url), 'utf8'), { mode: 'transform' });
+source = source.replaceAll("'@/lib/session-client'",JSON.stringify(sessionModule));
+source = source.replaceAll("'@/lib/query-client'", JSON.stringify(new URL('../src/lib/query-client.ts', import.meta.url).href));
+for (const name of ['@tanstack/react-query', 'zod']) source = source.replaceAll(`'${name}'`, JSON.stringify(import.meta.resolve(name)));
+const { loadProfile, commercialProfileOptions, crmRequest, CrmError } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+const id = '11111111-1111-4111-8111-111111111111';
+const other = '22222222-2222-4222-8222-222222222222';
+const profile = { id, name: 'Sintético', email: null, phone: 'Sintético', company: null, observations: '', status: 'NEW', sourceId: other, source: { id: other, code: 'META_1', name: 'Meta 1', isBase: false, isActive: true }, assignedToId: other, assignedTo: { id: other, firstName: 'Vendedor', lastName: null, email: 'seller@example.com' }, version: 1, createdAt: '2026-11-02T12:00:00Z', updatedAt: '2026-11-02T12:00:00Z', nextActivity: null };
+const originalFetch = globalThis.fetch;
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+try {
+  globalThis.fetch = async (_url, init) => { assert.equal(init.cache, 'no-store'); return Response.json(profile); };
+  assert.equal((await loadProfile(id, new AbortController().signal)).id, id);
+  await assert.rejects(loadProfile(other, new AbortController().signal), /otro lead/);
+  globalThis.fetch = async () => Response.json({ ...profile, status: 'CLOSED' });
+  await assert.rejects(loadProfile(id, new AbortController().signal));
+  globalThis.fetch = async () => Response.json({ ...profile, createdAt: 'invalid-date' });
+  await assert.rejects(loadProfile(id, new AbortController().signal));
+  for (const status of [401, 403, 404, 409]) {
+    globalThis.fetch = async () => Response.json({ message: 'Error sintético' }, { status });
+    await assert.rejects(loadProfile(id, new AbortController().signal), (error) => error instanceof CrmError && error.status === status);
+  }
+  globalThis.fetch = async () => new Response('<html>Unavailable</html>', { status: 503 });
+  await assert.rejects(crmRequest('leads'), (error) => error instanceof CrmError && error.status === 503 && /servidor/.test(error.message));
+  globalThis.fetch = async () => Response.json(null, { status: 400 });
+  await assert.rejects(crmRequest('leads'), (error) => error instanceof CrmError && error.status === 400);
+  globalThis.fetch = async () => new Response('invalid-json', { status: 200 });
+  await assert.rejects(crmRequest('leads'), (error) => error instanceof CrmError && error.status === 502);
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(crmRequest('leads'), (error) => error instanceof CrmError && error.status === 0 && /conexión/.test(error.message));
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  assert.equal(await crmRequest('tasks'), undefined);
+  const cancelled = new AbortController();
+  cancelled.abort();
+  globalThis.fetch = async (_url, init) => { throw init.signal.reason; };
+  await assert.rejects(crmRequest('leads', { signal: cancelled.signal }), (error) => error.name === 'AbortError');
+  console.log('PASS: network failures, non-JSON server errors, malformed responses, empty bodies and quiet cancellation');
+  const a = commercialProfileOptions('seller-a', id, 'opening-1');
+  const b = commercialProfileOptions('seller-b', id, 'opening-1');
+  const reopened = commercialProfileOptions('seller-a', id, 'opening-2');
+  assert.notDeepEqual(a.queryKey, b.queryKey);
+  assert.notDeepEqual(a.queryKey, reopened.queryKey);
+  assert.equal(a.gcTime, 0);
+  assert(!('placeholderData' in a));
+  let aborted = false;
+  globalThis.fetch = async (_url, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => { aborted = true; reject(new DOMException('Cancelled', 'AbortError')); }, { once: true });
+  });
+  const observer = new QueryObserver(client, a);
+  const unsubscribe = observer.subscribe(() => {});
+  await tick();
+  unsubscribe();
+  await tick();
+  assert(aborted);
+  assert.equal(client.getQueryCache().getAll().length, 0);
+  globalThis.fetch = async () => Response.json(profile);
+  assert.equal((await client.fetchQuery(reopened)).id, id);
+  await tick();
+  assert.equal(client.getQueryCache().getAll().length, 0);
+  console.log('PASS: real profile validation, identity isolation, reopening, abort and empty cache');
+} finally { globalThis.fetch = originalFetch; client.clear(); }
+
+const run = createActionRunner();
+let release;
+let calls = 0;
+const paused = new Promise((resolve) => { release = resolve; });
+const first = run(async () => { calls++; await paused; });
+assert.equal(await run(async () => { calls++; }), false);
+assert.equal(calls, 1);
+release();
+assert.equal(await first, true);
+await assert.rejects(run(async () => { throw new Error('Synthetic failure'); }), /Synthetic failure/);
+assert.equal(await run(async () => { calls++; }), true);
+assert.equal(calls, 2);
+console.log('PASS: synchronous duplicate-submit protection and retry after failure');

@@ -2,6 +2,8 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Let the BFF enforce its 10 MB file limit without proxy truncation.
+  experimental: { proxyClientMaxBodySize: '11mb' },
   async headers() {
     return [
       {

@@ -1,5 +1,6 @@
 'use client';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+/* Acciones de cuenta del starter conservadas.
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
+*/
 import {
   Sidebar,
   SidebarContent,
@@ -27,17 +29,19 @@ import {
 import { navGroups } from '@/config/nav-config';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Icons } from '@/components/icons';
 
 export default function AppSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
+  // const router = useRouter(); // Reservado para acciones futuras de cuenta.
   const filteredGroups = useFilteredNavGroups(navGroups);
 
   return (
     <Sidebar collapsible='icon'>
-      <SidebarHeader />
+      <SidebarHeader>
+        <span className='truncate px-2 py-4 font-semibold'>InfoPrepaga</span>
+      </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
@@ -97,6 +101,8 @@ export default function AppSidebar() {
         ))}
       </SidebarContent>
       <SidebarFooter>
+        <span className='px-2 py-3 text-xs text-sidebar-foreground/70'>InfoPrepaga CRM</span>
+        {/* Menú de cuenta de ejemplo conservado para futuras funcionalidades.
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -135,6 +141,7 @@ export default function AppSidebar() {
             </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
+        */}
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

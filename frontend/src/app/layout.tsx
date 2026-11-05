@@ -16,8 +16,8 @@ const META_THEME_COLORS = {
 };
 
 export const metadata: Metadata = {
-  title: { default: 'InfoPrepaga · Starter', template: '%s | InfoPrepaga' },
-  description: 'Entorno de validación técnica de las plantillas de InfoPrepaga.',
+  title: { default: 'InfoPrepaga CRM', template: '%s | InfoPrepaga' },
+  description: 'Gestión privada de leads y seguimientos comerciales.',
   robots: { index: false, follow: false }
 };
 

@@ -10,6 +10,20 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: crm_test
+          POSTGRES_PASSWORD: ci-synthetic-only
+          POSTGRES_DB: starter_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U crm_test -d starter_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CRM_TEST_DATABASE_URL: postgresql://crm_test:ci-synthetic-only@127.0.0.1:5432/starter_test
+      DATABASE_URL: postgresql://crm_test:ci-synthetic-only@127.0.0.1:5432/starter_test
     defaults:
       run:
         working-directory: backend
@@ -22,15 +36,29 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: backend/pnpm-lock.yaml
+          cache-dependency-path: |
+            backend/pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm prisma:generate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install pypdf==6.10.0
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test --runInBand
       - run: pnpm test:e2e --runInBand
       - run: pnpm build
+      - name: Install frontend for BFF integration
+        run: pnpm -C ../frontend install --frozen-lockfile
+      - name: Build frontend for BFF integration
+        run: pnpm -C ../frontend build
+        env:
+          BUILD_STANDALONE: 'true'
+      - name: Verify Next.js and NestJS integration with disposable PostgreSQL
+        run: node ../scripts/verify-crm.mjs
       - run: pnpm audit --prod --audit-level=low
   frontend:
     runs-on: ubuntu-latest
@@ -54,4 +82,10 @@ jobs:
       - run: pnpm build
         env:
           BUILD_STANDALONE: 'true'
+      - run: node --experimental-strip-types scripts/verify-followups.mjs
+      - run: node --experimental-strip-types scripts/verify-lead-profile.mjs
+      - run: node --experimental-strip-types scripts/verify-avalian.mjs
+      - run: node --experimental-strip-types scripts/verify-crm-profile.mjs
+      - run: node --experimental-strip-types scripts/verify-sessions.mjs
+      - run: node --experimental-strip-types scripts/verify-reports.mjs
       - run: pnpm audit --prod --audit-level=low

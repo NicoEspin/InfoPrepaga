@@ -1,0 +1,13 @@
+.whatsapp {
+  color: #15803d;
+  background-color: #dcfce7;
+}
+
+.whatsapp:hover {
+  color: #14532d;
+  background-color: #bbf7d0;
+}
+
+.whatsapp:is(a, button) svg {
+  color: inherit;
+}

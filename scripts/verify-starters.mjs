@@ -151,15 +151,15 @@ try {
     NODE_ENV: 'development', BACKEND_URL: api, APP_ORIGIN: dev, ENABLE_STARTER_DEMOS: 'true'
   });
   await waitFor(`${dev}/api/health`, devServer);
-  await expectStatus(`${dev}/dashboard/overview`, 307);
+  await expectStatus(`${dev}/pipeline`, 307);
   await expectStatus(`${dev}/api/products`, 401);
   const devLogin = await expectStatus(`${dev}/api/auth/login`, 200, {
     ...json({ email, password }), headers: { 'Content-Type': 'application/json', Origin: dev }
   });
   const devCookies = devLogin.headers.getSetCookie().map((cookie) => cookie.split(';')[0]).join('; ');
   assert(!devLogin.headers.getSetCookie().some((cookie) => /; Secure/i.test(cookie)));
-  const demoPage = await expectStatus(`${dev}/dashboard/overview`, 200, { headers: { Cookie: devCookies } });
-  assert.match(await demoPage.text(), /PLANTILLA DE PRUEBAS/);
+  const demoPage = await expectStatus(`${dev}/pipeline`, 200, { headers: { Cookie: devCookies } });
+  assert.match(await demoPage.text(), /Vista previa/);
   await expectStatus(`${dev}/api/products`, 200, { headers: { Cookie: devCookies } });
   await expectStatus(`${dev}/api/products`, 403, { method: 'POST', headers: { Cookie: devCookies } });
   const vendorDevLogin = await expectStatus(`${dev}/api/auth/login`, 200, {
@@ -167,7 +167,7 @@ try {
   });
   const vendorDevCookies = vendorDevLogin.headers.getSetCookie().map((cookie) => cookie.split(';')[0]).join('; ');
   await expectStatus(`${dev}/api/products`, 403, { headers: { Cookie: vendorDevCookies } });
-  await expectStatus(`${dev}/dashboard/overview`, 404, { headers: { Cookie: vendorDevCookies } });
+  await expectStatus(`${dev}/pipeline`, 404, { headers: { Cookie: vendorDevCookies } });
 
   // Verify protection actually runs in the global guard chain.
   for (let index = 0; index < 12; index++) {

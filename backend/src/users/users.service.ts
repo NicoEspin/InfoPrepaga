@@ -1,15 +1,9 @@
 import { assertAdmin } from '../common/authorization';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AssignRolesDto } from './dto/assign-roles.dto';
 
-const userInclude = {
+export const userInclude = {
   roles: {
     include: {
       role: {
@@ -28,45 +22,6 @@ const userInclude = {
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
-
-  async create(data: {
-    email: string;
-    password: string;
-    firstName?: string;
-    lastName?: string;
-  }) {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: data.email },
-    });
-
-    if (existing) {
-      throw new ConflictException('Email already registered');
-    }
-
-    const roleName = 'VENDEDOR';
-    const role = await this.prisma.role.findUnique({
-      where: { name: roleName },
-    });
-
-    if (!role) {
-      throw new NotFoundException(`Default role ${roleName} not found`);
-    }
-
-    const hashedPassword = await bcrypt.hash(data.password, 12);
-
-    return this.prisma.user.create({
-      data: {
-        email: data.email,
-        password: hashedPassword,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        roles: {
-          create: [{ roleId: role.id }],
-        },
-      },
-      include: userInclude,
-    });
-  }
 
   async findAll(actor: AuthenticatedUser) {
     assertAdmin(actor, 'users:read');
@@ -95,39 +50,17 @@ export class UsersService {
   }
 
   async findByEmail(email: string) {
-    return this.prisma.user.findUnique({
-      where: { email },
+    return this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
       include: userInclude,
     });
   }
 
-  async assignRoles(
-    userId: string,
-    dto: AssignRolesDto,
-    actor: AuthenticatedUser,
-  ) {
-    assertAdmin(actor, 'users:manage');
-    await this.findIdentityById(userId);
-
-    const roles = await this.prisma.role.findMany({
-      where: { id: { in: dto.roleIds } },
-    });
-
-    if (
-      roles.length !== dto.roleIds.length ||
-      roles.some((role) => !['ADMIN', 'VENDEDOR'].includes(role.name))
-    ) {
-      throw new NotFoundException('One or more roles were not found');
-    }
-
-    await this.prisma.$transaction([
-      this.prisma.userRole.deleteMany({ where: { userId } }),
-      this.prisma.userRole.createMany({
-        data: dto.roleIds.map((roleId) => ({ userId, roleId })),
-      }),
-    ]);
-
-    return this.findIdentityById(userId);
+  async resolveRole(id: string): Promise<'ADMIN' | 'VENDEDOR'> {
+    const role = await this.prisma.role.findUnique({ where: { id } });
+    if (!role || !['ADMIN', 'VENDEDOR'].includes(role.name))
+      throw new NotFoundException('Rol no encontrado');
+    return role.name as 'ADMIN' | 'VENDEDOR';
   }
 
   toSafeUser(user: {
