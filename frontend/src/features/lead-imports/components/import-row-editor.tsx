@@ -137,8 +137,12 @@ export function ImportRowEditor({
             defaultValue={row.decision}
             disabled={pending}
           >
-            <NativeSelectOption value='AUTO'>Automática: omitir repetidos</NativeSelectOption>
-            <NativeSelectOption value='INCLUDE'>Cargar, aunque esté repetido</NativeSelectOption>
+            <NativeSelectOption value='AUTO'>
+              Automática: crear o consolidar coincidencias compatibles
+            </NativeSelectOption>
+            <NativeSelectOption value='INCLUDE'>
+              Incluir si es compatible; revisar conflictos
+            </NativeSelectOption>
             <NativeSelectOption value='OMIT'>Omitir</NativeSelectOption>
           </NativeSelect>
         </Field>

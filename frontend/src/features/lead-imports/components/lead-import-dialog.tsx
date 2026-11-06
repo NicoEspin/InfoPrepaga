@@ -13,7 +13,14 @@ import { LoadingButton } from '@/components/ui/loading-button';
 import { LeadPhoneCell } from '@/features/leads/components/lead-phone-cell';
 import { Input } from '@/components/ui/input';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -41,9 +48,9 @@ import {
   reviewImport,
   uploadImport
 } from '../api/service';
-import type { BatchChanges, ImportRow, RowChanges } from '../api/types';
+import type { BatchChanges, ImportRow, ImportFilter, RowChanges } from '../api/types';
+import { ImportComparison } from './import-comparison';
 import { ImportRowEditor } from './import-row-editor';
-
 export default function LeadImportDialog({
   actorId,
   onClose
@@ -51,6 +58,12 @@ export default function LeadImportDialog({
   actorId: string;
   onClose: () => void;
 }) {
+  const [filter, setFilter] = useState<ImportFilter>('REVIEW');
+  const [excludePending, setExcludePending] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [aliases, setAliases] = useState('');
+  const [cleanup, setCleanup] = useState<BatchChanges['bulkCleanup']>();
   const [id, setId] = useState('');
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<ImportRow | null>(null);
@@ -62,7 +75,7 @@ export default function LeadImportDialog({
   const client = useQueryClient();
   const refreshCrm = useRefreshCrm();
   const list = useQuery(importListOptions(actorId));
-  const preview = useQuery(importPreviewOptions(actorId, id, page));
+  const preview = useQuery(importPreviewOptions(actorId, id, page, filter));
   const catalogs = useCrmQuery<Catalogs>(actorId, 'catalogs');
   const accounts = useCrmQuery<Seller[]>(actorId, 'users');
   const sellers = (accounts.data ?? []).filter(
@@ -94,7 +107,24 @@ export default function LeadImportDialog({
   function update(changes: BatchChanges) {
     if (!data) return;
     void run(async () => {
-      await changeImport(id, data.version, changes, data.reviewToken);
+      await changeImport(
+        id,
+        data.version,
+        {
+          ...changes,
+          mappings: changes.mappings?.map((mapping) => ({
+            ...mapping,
+            remember,
+            ...(mapping.advisor && {
+              aliases: aliases
+                .split(',')
+                .map((alias) => alias.trim())
+                .filter(Boolean)
+            })
+          }))
+        },
+        data.reviewToken
+      );
       setEditing(null);
     });
   }
@@ -107,13 +137,14 @@ export default function LeadImportDialog({
   }
   function start() {
     if (!data) return;
+    setConfirming(false);
     pause.current = false;
     void run(async () => {
       let version = data.version;
       do {
-        const progress = await confirmImport(id, version);
+        const progress = await confirmImport(id, version, excludePending);
         setMessage(
-          `Cargados: ${progress.imported}. ${progress.status === 'COMPLETE' ? `Carga finalizada. Omitidos: ${progress.omitted}.` : 'Podés pausar después del bloque actual.'}`
+          `Nuevos: ${progress.created}. Actualizados: ${progress.updated}. Consolidados: ${progress.merged}. ${progress.status === 'COMPLETE' ? `Carga finalizada. Omitidos: ${progress.omitted}.` : 'Podés pausar después del bloque actual.'}`
         );
         await refreshCrm();
         if (progress.status === 'COMPLETE') break;
@@ -223,15 +254,24 @@ export default function LeadImportDialog({
         )}
         {data && (
           <>
-            <div className='flex flex-wrap items-center gap-2'>
+            <div className='flex flex-wrap items-center gap-2' aria-live='polite'>
               <strong>{data.fileName}</strong>
-              <Badge variant='secondary'>{data.summary.imported} cargados</Badge>
-              <Badge variant='secondary'>{data.summary.pending} pendientes</Badge>
-              <Badge variant='secondary'>{data.summary.omitted} omitidos</Badge>
-              <Badge variant='secondary'>{data.summary.duplicates} posibles duplicados</Badge>
-              <Badge variant={data.summary.invalid ? 'destructive' : 'secondary'}>
-                {data.summary.invalid} con errores seleccionados
+              <Badge variant='secondary'>{data.summary.detected} filas detectadas</Badge>
+              <Badge variant='secondary'>{data.summary.uniqueContacts} contactos estimados</Badge>
+              <Badge variant='secondary'>{data.summary.creates} nuevos</Badge>
+              <Badge variant='secondary'>{data.summary.updates} existentes para actualizar</Badge>
+              <Badge variant='secondary'>
+                {data.summary.internalMatches} coincidencias internas
               </Badge>
+              <Badge variant='secondary'>{data.summary.omitted} omitidos</Badge>
+              <Badge variant='secondary'>
+                {data.summary.configuration} requieren configuración
+              </Badge>
+              <Badge variant={data.summary.contactErrors ? 'destructive' : 'secondary'}>
+                {data.summary.contactErrors} errores de contacto
+              </Badge>
+              <Badge variant='secondary'>{data.summary.review} requieren revisión</Badge>
+              <Badge variant='secondary'>{data.summary.imported} apariciones procesadas</Badge>
             </div>
             {data.warnings.length > 0 && (
               <Alert>
@@ -263,71 +303,162 @@ export default function LeadImportDialog({
               ))}
             </fieldset>
             {configurable && (
-              <FieldGroup className='grid gap-3 md:grid-cols-2'>
-                {data.groups.map((group) => (
-                  <Field key={`${group.sheet}:${group.group}`}>
-                    <FieldLabel>
-                      Origen: {group.sheet} / {group.group}
-                    </FieldLabel>
-                    <NativeSelect
-                      aria-label={`Origen ${group.sheet} ${group.group}`}
-                      value={group.sourceId ?? ''}
-                      disabled={pending}
-                      onChange={(event) => {
-                        if (event.target.value)
-                          update({
-                            mappings: [
-                              {
-                                sheet: group.sheet,
-                                group: group.group,
-                                sourceId: event.target.value
-                              }
-                            ]
-                          });
-                      }}
-                    >
-                      <NativeSelectOption value=''>Confirmá un origen</NativeSelectOption>
-                      {catalogs.data?.sources
-                        .filter((source) => source.isActive)
-                        .map((source) => (
-                          <NativeSelectOption key={source.id} value={source.id}>
-                            {source.name}
-                          </NativeSelectOption>
-                        ))}
-                    </NativeSelect>
-                  </Field>
-                ))}
-                {data.advisors.map((item) => (
-                  <Field key={item.advisor}>
-                    <FieldLabel>Asesor del Excel: {item.advisor}</FieldLabel>
-                    <NativeSelect
-                      aria-label={`Vendedor para ${item.advisor}`}
-                      value={item.resolved ? (item.assignedToId ?? 'AUTO') : ''}
-                      disabled={pending}
-                      onChange={(event) => {
-                        if (event.target.value)
-                          update({
-                            mappings: [
-                              {
-                                advisor: item.advisor,
-                                assignedToId:
-                                  event.target.value === 'AUTO' ? null : event.target.value
-                              }
-                            ]
-                          });
-                      }}
-                    >
-                      <NativeSelectOption value=''>Relacioná con un vendedor</NativeSelectOption>
-                      <NativeSelectOption value='AUTO'>Reparto automático</NativeSelectOption>
-                      {sellers.map((seller) => (
-                        <NativeSelectOption key={seller.id} value={seller.id}>
-                          {personName(seller)}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                ))}
-              </FieldGroup>
+              <details>
+                <summary>Configuración de orígenes, vendedores y reglas de asignación</summary>
+                <p>
+                  Solo las correspondencias inequívocas se resuelven automáticamente. Los
+                  responsables existentes se conservan.
+                </p>
+                <label className='flex items-center gap-2'>
+                  <input
+                    type='checkbox'
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                  />
+                  Recordar equivalencias para próximas importaciones
+                </label>
+                <Field>
+                  <FieldLabel htmlFor='import-aliases'>
+                    Otros alias del asesor que vas a relacionar (separados por coma)
+                  </FieldLabel>
+                  <Input
+                    id='import-aliases'
+                    value={aliases}
+                    onChange={(event) => setAliases(event.target.value)}
+                    placeholder='Ej.: Fede, Federico'
+                  />
+                </Field>
+                <FieldGroup className='grid gap-3 md:grid-cols-2'>
+                  {data.groups.map((group) => (
+                    <Field key={`${group.sheet}:${group.group}`}>
+                      <FieldLabel>
+                        Origen: {group.sheet} / {group.group}
+                      </FieldLabel>
+                      <Select
+                        items={(catalogs.data?.sources ?? [])
+                          .filter((source) => source.isActive)
+                          .map((source) => ({ value: source.id, label: source.name }))}
+                        value={group.sourceId ?? null}
+                        disabled={pending}
+                        onValueChange={(value) => {
+                          if (value)
+                            update({
+                              mappings: [
+                                {
+                                  sheet: group.sheet,
+                                  group: group.group,
+                                  sourceId: value
+                                }
+                              ]
+                            });
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label={`Origen ${group.sheet} ${group.group}`}
+                          className='w-full'
+                        >
+                          <SelectValue placeholder='Confirmá un origen' />
+                        </SelectTrigger>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            {catalogs.data?.sources
+                              .filter((source) => source.isActive)
+                              .map((source) => (
+                                <SelectItem key={source.id} value={source.id}>
+                                  {source.name}
+                                </SelectItem>
+                              ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  ))}
+                  {data.advisors.map((item) => (
+                    <Field key={item.advisor}>
+                      <FieldLabel>Asesor del Excel: {item.advisor}</FieldLabel>
+                      <Select
+                        items={[
+                          { value: 'AUTO', label: 'Reparto automático' },
+                          ...sellers.map((seller) => ({
+                            value: seller.id,
+                            label: personName(seller)
+                          }))
+                        ]}
+                        value={item.resolved ? (item.assignedToId ?? 'AUTO') : null}
+                        disabled={pending}
+                        onValueChange={(value) => {
+                          if (value)
+                            update({
+                              mappings: [
+                                {
+                                  advisor: item.advisor,
+                                  assignedToId: value === 'AUTO' ? null : value
+                                }
+                              ]
+                            });
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label={`Vendedor para ${item.advisor}`}
+                          className='w-full'
+                        >
+                          <SelectValue placeholder='Relacioná con un vendedor' />
+                        </SelectTrigger>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value='AUTO'>Reparto automático</SelectItem>
+                            {sellers.map((seller) => (
+                              <SelectItem key={seller.id} value={seller.id}>
+                                {personName(seller)}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  ))}
+                  {data.sheets.map((sheet) => (
+                    <Field key={`default:${sheet}`}>
+                      <FieldLabel>
+                        Responsable predeterminado de {sheet} (solo filas sin asesor)
+                      </FieldLabel>
+                      <Select
+                        items={[
+                          { value: 'AUTO', label: 'Reparto automático' },
+                          ...sellers.map((seller) => ({
+                            value: seller.id,
+                            label: personName(seller)
+                          }))
+                        ]}
+                        onValueChange={(value) => {
+                          if (typeof value === 'string')
+                            update({
+                              mappings: [{ sheet, assignedToId: value === 'AUTO' ? null : value }]
+                            });
+                        }}
+                        disabled={pending}
+                      >
+                        <SelectTrigger
+                          className='w-full'
+                          aria-label={`Responsable predeterminado ${sheet}`}
+                        >
+                          <SelectValue placeholder='Usar reparto o elegir responsable' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value='AUTO'>Reparto automático</SelectItem>
+                            {sellers.map((seller) => (
+                              <SelectItem key={seller.id} value={seller.id}>
+                                {personName(seller)}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  ))}
+                </FieldGroup>
+              </details>
             )}
             {reviewable && (
               <div className='flex flex-wrap gap-2'>
@@ -336,7 +467,7 @@ export default function LeadImportDialog({
                   disabled={pending || !data.summary.duplicates}
                   onClick={() => update({ duplicates: 'INCLUDE' })}
                 >
-                  Cargar todos los duplicados
+                  Consolidar coincidencias compatibles
                 </Button>
                 <Button
                   variant='outline'
@@ -353,6 +484,65 @@ export default function LeadImportDialog({
                   Restablecer selección automática
                 </Button>
               </div>
+            )}
+            {reviewable && (
+              <details>
+                <summary>Correcciones masivas conservadoras</summary>
+                <p>
+                  Solo se descarta un campo opcional incorrecto si queda otro contacto válido y no
+                  hay conflictos de identidad. Se conserva el original en el historial de
+                  importación.
+                </p>
+                <div className='flex flex-wrap gap-2'>
+                  {(
+                    [
+                      ['INVALID_EMAIL', 'Descartar correo inválido'],
+                      ['INVALID_PHONE', 'Descartar teléfono inválido'],
+                      ['FORMULA_PHONE', 'Omitir fórmula de teléfono']
+                    ] as const
+                  ).map(([kind, label]) => (
+                    <Button
+                      key={kind}
+                      variant='outline'
+                      disabled={pending || !data.summary.cleanupCandidates[kind]}
+                      onClick={() => setCleanup(kind)}
+                    >
+                      {label} ({data.summary.cleanupCandidates[kind]})
+                    </Button>
+                  ))}
+                </div>
+              </details>
+            )}
+            {cleanup && (
+              <Dialog
+                open
+                onOpenChange={(open) => {
+                  if (!open) setCleanup(undefined);
+                }}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Confirmar corrección masiva</DialogTitle>
+                    <DialogDescription>
+                      Se quitará el campo opcional incorrecto de{' '}
+                      {data.summary.cleanupCandidates[cleanup]} apariciones. El valor original se
+                      conservará como procedencia histórica. No se fusionarán identidades ni se
+                      cambiarán leads existentes en esta etapa.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Button
+                    onClick={() => {
+                      update({ bulkCleanup: cleanup });
+                      setCleanup(undefined);
+                    }}
+                  >
+                    Aplicar corrección a la revisión
+                  </Button>
+                  <Button variant='outline' onClick={() => setCleanup(undefined)}>
+                    Cancelar
+                  </Button>
+                </DialogContent>
+              </Dialog>
             )}
             {data.summary.requiresReview && (
               <Alert>
@@ -373,6 +563,49 @@ export default function LeadImportDialog({
                   </Button>
                 </AlertDescription>
               </Alert>
+            )}
+            <Select
+              items={[
+                { value: 'REVIEW', label: 'Necesitan revisión' },
+                { value: 'ALL', label: 'Todos' },
+                { value: 'CREATE', label: 'Listos para crear' },
+                { value: 'UPDATE', label: 'Listos para actualizar' },
+                { value: 'MERGE', label: 'Apariciones para consolidar' },
+                { value: 'DUPLICATES', label: 'Duplicados' },
+                { value: 'SKIP', label: 'Omitidos' }
+              ]}
+              value={filter}
+              onValueChange={(value) => {
+                if (value) {
+                  setFilter(value as ImportFilter);
+                  setPage(1);
+                  setEditing(null);
+                }
+              }}
+            >
+              <SelectTrigger aria-label='Filtrar revisión'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {[
+                    ['REVIEW', 'Necesitan revisión'],
+                    ['ALL', 'Todos'],
+                    ['CREATE', 'Listos para crear'],
+                    ['UPDATE', 'Listos para actualizar'],
+                    ['MERGE', 'Apariciones para consolidar'],
+                    ['DUPLICATES', 'Duplicados'],
+                    ['SKIP', 'Omitidos']
+                  ].map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {data.rowTotal === 0 && (
+              <p>No hay filas en este filtro. Revisá el resumen o elegí Todos.</p>
             )}
             <Table>
               <TableHeader>
@@ -429,7 +662,21 @@ export default function LeadImportDialog({
                       )}
                     </TableCell>
                     <TableCell>
-                      {row.leadId ? 'Cargado' : row.selected ? 'Se cargará' : 'Se omitirá'}
+                      {row.leadId
+                        ? 'Procesado'
+                        : row.state === 'CONFIGURATION'
+                          ? 'Requiere configuración'
+                          : row.state === 'CORRECTION'
+                            ? 'Requiere corrección'
+                            : row.action === 'CREATE'
+                              ? 'Listo para importar'
+                              : row.action === 'UPDATE'
+                                ? 'Listo para actualizar'
+                                : row.action === 'MERGE'
+                                  ? 'Listo para consolidar'
+                                  : row.replay
+                                    ? 'Ya importado: sin cambios'
+                                    : 'Omitido'}
                       {!row.leadId && row.active && reviewable && (
                         <div className='mt-2 flex gap-2'>
                           <Button
@@ -451,7 +698,7 @@ export default function LeadImportDialog({
                                   row.id,
                                   data.version,
                                   {
-                                    decision: row.selected ? 'OMIT' : 'INCLUDE',
+                                    decision: row.action === 'SKIP' ? 'INCLUDE' : 'OMIT',
                                     acknowledgeDuplicates: true
                                   },
                                   data.reviewToken
@@ -459,7 +706,7 @@ export default function LeadImportDialog({
                               })
                             }
                           >
-                            {row.selected ? 'Omitir' : 'Cargar'}
+                            {row.action === 'SKIP' ? 'Restaurar revisión' : 'Omitir'}
                           </Button>
                         </div>
                       )}
@@ -511,6 +758,39 @@ export default function LeadImportDialog({
                     </DialogDescription>
                   </DialogHeader>
                   <Feedback error={error} />
+                  <ImportComparison row={editing} statuses={catalogs.data?.statuses ?? []} />
+                  <details>
+                    <summary>Datos históricos de la fila</summary>
+                    {(
+                      [
+                        ['originalDate', 'Fecha original'],
+                        ['schedule', 'Horario'],
+                        ['segment', 'Segmento / régimen'],
+                        ['originalAdvisor', 'Asesor original'],
+                        ['originalPhone', 'Teléfono original'],
+                        ['nameColumns', 'Columnas de procedencia']
+                      ] as const
+                    ).map(([key, label]) => (
+                      <p key={key}>
+                        {label}: {editing.metadata[key] || 'Sin dato'}
+                      </p>
+                    ))}
+                    {editing.metadata.reviewedOriginal && (
+                      <div>
+                        <strong>Valores descartados con autorización</strong>
+                        {Object.entries(editing.metadata.reviewedOriginal).map(([field, value]) => (
+                          <p key={field}>
+                            {field === 'email'
+                              ? 'Correo'
+                              : field === 'phone'
+                                ? 'Teléfono'
+                                : 'Fórmula omitida'}
+                            : {String(value || 'Sin valor de texto')}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </details>
                   <ImportRowEditor
                     key={`${editing.id}:${data.version}`}
                     row={editing}
@@ -520,6 +800,37 @@ export default function LeadImportDialog({
                     save={save}
                     close={() => setEditing(null)}
                   />
+                </DialogContent>
+              </Dialog>
+            )}
+            {reviewable && data.summary.review > 0 && (
+              <label className='flex items-center gap-2'>
+                <input
+                  type='checkbox'
+                  checked={excludePending}
+                  onChange={(event) => setExcludePending(event.target.checked)}
+                  disabled={pending}
+                />
+                Excluir explícitamente las {data.summary.review} excepciones pendientes e importar
+                el resto
+              </label>
+            )}
+            {confirming && (
+              <Dialog open onOpenChange={setConfirming}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Confirmar modificaciones</DialogTitle>
+                    <DialogDescription>
+                      {data.summary.creates} nuevos leads; {data.summary.updates} contactos
+                      existentes actualizados; {data.summary.merged} apariciones consolidadas;{' '}
+                      {data.summary.omitted} omitidos; {excludePending ? data.summary.review : 0}{' '}
+                      pendientes excluidos. Se preservan los datos comerciales vigentes.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Button onClick={start}>Confirmar y procesar</Button>
+                  <Button variant='outline' onClick={() => setConfirming(false)}>
+                    Volver a revisar
+                  </Button>
                 </DialogContent>
               </Dialog>
             )}
@@ -553,9 +864,13 @@ export default function LeadImportDialog({
                   loading={pending}
                   loadingLabel='Procesando…'
                   disabled={
-                    pending || data.summary.invalid > 0 || data.summary.requiresReview || !!editing
+                    pending ||
+                    (data.summary.invalid > 0 && !excludePending) ||
+                    (data.summary.requiresReview && !excludePending) ||
+                    data.summary.unreviewedReady > 0 ||
+                    !!editing
                   }
-                  onClick={start}
+                  onClick={() => setConfirming(true)}
                 >
                   {data.status === 'IMPORTING'
                     ? 'Reanudar carga'

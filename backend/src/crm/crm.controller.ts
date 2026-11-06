@@ -117,6 +117,20 @@ export class CrmController {
     return this.crm.editLead(id, dto, actor);
   }
 
+  @Get('leads/:id/import-appearances')
+  @CrmResponse('appearances')
+  @ApiOperation({
+    summary:
+      'Procedencias históricas paginadas; mismo alcance del lead, sin duplicar reimportaciones',
+  })
+  appearances(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: PageDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.crm.importAppearances(id, query, actor);
+  }
+
   @Patch('leads/:id/status')
   @CrmResponse('lead')
   status(

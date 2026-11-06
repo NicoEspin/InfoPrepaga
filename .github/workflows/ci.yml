@@ -57,8 +57,16 @@ jobs:
         run: pnpm -C ../frontend build
         env:
           BUILD_STANDALONE: 'true'
+      - name: Install isolated browser test tooling
+        run: |
+          npm install --prefix "$RUNNER_TEMP/import-browser" --no-package-lock --ignore-scripts playwright@1.62.1
+          node "$RUNNER_TEMP/import-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Verify Next.js and NestJS integration with disposable PostgreSQL
         run: node ../scripts/verify-crm.mjs
+        env:
+          CRM_RUN_IMPORT_UI: 'true'
+          CRM_UI_BROWSER: bundled
+          NODE_PATH: ${{ runner.temp }}/import-browser/node_modules
       - run: pnpm audit --prod --audit-level=low
   frontend:
     runs-on: ubuntu-latest

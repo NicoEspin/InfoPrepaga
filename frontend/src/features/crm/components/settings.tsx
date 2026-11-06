@@ -1,4 +1,5 @@
 'use client';
+import { ImportMappings } from '@/features/lead-imports/components/import-mappings';
 import { Accounts } from '@/features/accounts/components/accounts';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { CrmContent } from '@/components/layout/crm-content';
@@ -49,6 +50,7 @@ export function CommercialSettings({ actor }: { actor: Identity }) {
             <TabsTrigger value='users'>Usuarios</TabsTrigger>
             <TabsTrigger value='allocation'>Reparto</TabsTrigger>
             <TabsTrigger value='sources'>Bases</TabsTrigger>
+            <TabsTrigger value='imports'>Importación Excel</TabsTrigger>
           </TabsList>
           <TabsContent value='users'>
             <Accounts actorId={user.id} />
@@ -189,6 +191,9 @@ export function CommercialSettings({ actor }: { actor: Identity }) {
                 </ul>
               </CardContent>
             </Card>
+          </TabsContent>
+          <TabsContent value='imports'>
+            <ImportMappings actorId={user.id} />
           </TabsContent>
         </Tabs>
       </div>

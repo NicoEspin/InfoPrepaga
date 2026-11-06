@@ -6,7 +6,10 @@ export function contactKeys(email?: string | null, phone?: string | null) {
   // Parse a complete number only: prose containing digits is not a phone key.
   const parsed =
     raw && /^[+\d\s()./-]+$/.test(raw)
-      ? parsePhoneNumberFromString(raw, 'AR')
+      ? parsePhoneNumberFromString(raw, {
+          defaultCountry: 'AR',
+          extract: false,
+        })
       : undefined;
   return {
     emailKey,

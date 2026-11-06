@@ -27,6 +27,9 @@ model User {
   createdTasks  CommercialTask[]  @relation("TaskCreator")
   activities    LeadActivity[]
   leadImports   LeadImportBatch[]
+  importAliasTargets LeadImportMapping[] @relation("ImportAliasTarget")
+  confirmedImportMappings LeadImportMapping[] @relation("ImportMappingAuthor")
+  importMappingEvents LeadImportMappingEvent[]
   commercialActions CommercialMovement[] @relation("MovementActor")
   commercialSales CommercialMovement[] @relation("MovementResponsible")
   commercialReports CommercialReport[]
@@ -113,6 +116,8 @@ enum TaskPriority {
 }
 
 model LeadSource {
+  importMappings LeadImportMapping[]
+  importAppearances LeadImportAppearance[]
   id        String   @id @default(uuid())
   code      String   @unique
   name      String   @unique
@@ -137,7 +142,8 @@ model Lead {
   phoneKey           String?
   contactKeysVersion Int              @default(1)
   importData         Json?
-  importRow          LeadImportRow?
+  importRows         LeadImportRow[]
+  importAppearances  LeadImportAppearance[]
   commercialStage    CommercialStage @default(NEW)
   commercialStartedAt DateTime @default(now()) @db.Timestamptz(3)
   entrySourceId      String?
@@ -180,7 +186,12 @@ model LeadImportBatch {
   total       Int
   imported    Int             @default(0)
   omitted     Int             @default(0)
+  created     Int             @default(0)
+  updated     Int             @default(0)
+  merged      Int             @default(0)
+  excluded    Int             @default(0)
   rows        LeadImportRow[]
+  appearances LeadImportAppearance[]
 
   @@index([ownerId, createdAt])
   @@index([expiresAt, status])
@@ -208,12 +219,64 @@ model LeadImportRow {
   assignmentResolved Boolean         @default(false)
   decision           String          @default("AUTO")
   reviewedMatches    String[]
-  leadId             String?         @unique
+  leadId             String?
+  outcome            String?
   lead               Lead?           @relation(fields: [leadId], references: [id], onDelete: Restrict)
 
   @@unique([batchId, sheet, rowNumber])
   @@index([batchId, sheet, rowNumber])
+  @@index([leadId])
   @@map("lead_import_rows")
+}
+
+// Confirmed administrative equivalences and durable provenance.
+model LeadImportMapping {
+  kind          String
+  scope         String
+  key           String
+  sourceId      String?
+  source        LeadSource? @relation(fields: [sourceId], references: [id], onDelete: Restrict, map: "lead_import_mapping_source")
+  assignedToId  String?
+  assignedTo    User?       @relation("ImportAliasTarget", fields: [assignedToId], references: [id], onDelete: Restrict, map: "lead_import_mapping_seller")
+  confirmedById String
+  confirmedBy   User        @relation("ImportMappingAuthor", fields: [confirmedById], references: [id], onDelete: Restrict, map: "lead_import_mapping_author")
+  updatedAt     DateTime    @updatedAt
+
+  @@id([kind, scope, key])
+  @@map("lead_import_mappings")
+}
+
+model LeadImportAppearance {
+  id          String          @id @default(uuid())
+  fingerprint String          @unique
+  leadId      String
+  lead        Lead            @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  batchId     String
+  batch       LeadImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  fileName    String
+  sheet       String
+  rowNumber   Int
+  sourceId    String
+  source      LeadSource      @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  original    Json
+  createdAt   DateTime        @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([batchId])
+  @@map("lead_import_appearances")
+}
+
+model LeadImportMappingEvent {
+  id String @id @default(uuid())
+  actorId String
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  action String
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt, id])
+  @@map("lead_import_mapping_events")
 }
 
 model LeadNote {

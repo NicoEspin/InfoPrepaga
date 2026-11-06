@@ -1,3 +1,8 @@
+import { rememberImportMapping } from './import-mapping.store';
+import {
+  canCleanOptionalContact,
+  cleanOptionalContact,
+} from './lead-import.exceptions';
 import {
   BadRequestException,
   ConflictException,
@@ -13,24 +18,20 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CrmService } from './crm.service';
 import { contactKeys } from './contact-keys';
-import { createHash } from 'node:crypto';
-import { importContactErrors, parseLeadImport } from './lead-import.parser';
+import { parseLeadImport } from './lead-import.parser';
 import { ImportPatchDto, ImportRowPatchDto } from './lead-import.dto';
+import { planLeadImport, appearanceFingerprint } from './lead-import.plan';
+import { resolveImportMappings } from './lead-import.mappings';
+import { importKey } from './import-normalization';
+import { PeriodicJobLog } from '../common/periodic-job-log';
 type Tx = Prisma.TransactionClient;
-type Match = {
-  kind: 'email' | 'phone';
-  leadId?: string;
-  rowId?: string;
-  name: string;
-  sheet?: string;
-  rowNumber?: number;
-};
 
 @Injectable()
 export class LeadImportService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LeadImportService.name);
   private timer?: ReturnType<typeof setInterval>;
   private cleanup?: Promise<void>;
+  private readonly jobLog = new PeriodicJobLog();
   constructor(
     private readonly db: PrismaService,
     private readonly crm: CrmService,
@@ -47,17 +48,25 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
   private scheduleCleanup() {
     if (this.cleanup) return;
     this.cleanup = this.purgeExpired()
-      .catch(() => {
-        this.logger.error(
-          'No se pudo limpiar la revisión de importaciones; se reintentará',
-        );
+      .then(() => this.jobLog.success(this.logger, 'import-cleanup'))
+      .catch((error: unknown) => {
+        this.jobLog.failure(this.logger, 'import-cleanup', error);
       })
       .finally(() => {
         this.cleanup = undefined;
       });
   }
   async purgeExpired() {
-    await this.crm.write(async (tx) => {
+    if (
+      !(await this.db.leadImportBatch.count({
+        where: {
+          expiresAt: { lte: new Date() },
+          status: { in: ['REVIEW', 'IMPORTING', 'COMPLETE'] },
+        },
+      }))
+    )
+      return;
+    await this.crm.maintenanceWrite(async (tx) => {
       const expired = await tx.leadImportBatch.findMany({
         where: {
           expiresAt: { lte: new Date() },
@@ -142,14 +151,14 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
+      const resolved = await this.resolveMappings(tx, parsed.rows);
       // Keep inserts bounded; all rows belong to this atomic preparation.
       for (let i = 0; i < parsed.rows.length; i += 100)
         await tx.leadImportRow.createMany({
-          data: parsed.rows.slice(i, i + 100).map((row) => ({
+          data: resolved.slice(i, i + 100).map((row) => ({
             ...row,
             batchId: batch.id,
             reviewedMatches: [],
-            assignmentResolved: !row.advisor,
           })),
         });
       const preview = await this.analyze(tx, batch);
@@ -182,190 +191,137 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       where: { batchId: batch.id },
       orderBy: [{ sheet: 'asc' }, { rowNumber: 'asc' }],
     });
-    const active = rows.filter((row) => batch.sheets.includes(row.sheet));
-    const keys = active.map((row) => contactKeys(row.email, row.phone));
+    const keys = rows
+      .filter((row) => batch.sheets.includes(row.sheet))
+      .map((row) => contactKeys(row.email, row.phone));
     const emailKeys = [
-      ...new Set(
-        keys.map((key) => key.emailKey).filter((key): key is string => !!key),
-      ),
+      ...new Set(keys.flatMap((key) => (key.emailKey ? [key.emailKey] : []))),
     ];
     const phoneKeys = [
-      ...new Set(
-        keys.map((key) => key.phoneKey).filter((key): key is string => !!key),
-      ),
+      ...new Set(keys.flatMap((key) => (key.phoneKey ? [key.phoneKey] : []))),
     ];
-    const ownIds = rows
-      .map((row) => row.leadId)
-      .filter((id): id is string => !!id);
-    const [leads, sources, sellers] = await Promise.all([
+    const [leads, sources, sellers, appearances] = await Promise.all([
       tx.lead.findMany({
         where: {
           OR: [
             { emailKey: { in: emailKeys } },
             { phoneKey: { in: phoneKeys } },
           ],
-          ...(ownIds.length && { id: { notIn: ownIds } }),
         },
-        select: { id: true, name: true, emailKey: true, phoneKey: true },
+        select: {
+          id: true,
+          name: true,
+          emailKey: true,
+          phoneKey: true,
+          version: true,
+          assignedToId: true,
+          email: true,
+          phone: true,
+          sourceId: true,
+          status: true,
+          commercialStage: true,
+          observations: true,
+          source: { select: { name: true } },
+          assignedTo: { select: { firstName: true, lastName: true } },
+        },
       }),
       tx.leadSource.findMany({
         where: { isActive: true },
-        select: { id: true },
+        select: { id: true, name: true },
       }),
       tx.user.findMany({
         where: {
           isActive: true,
-          roles: {
-            some: { role: { name: { in: ['ADMIN', 'VENDEDOR'] } } },
-          },
+          deletedAt: null,
+          roles: { some: { role: { name: { in: ['ADMIN', 'VENDEDOR'] } } } },
         },
-        select: { id: true },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      tx.leadImportAppearance.findMany({
+        where: { fingerprint: { in: rows.map(appearanceFingerprint) } },
+        select: { fingerprint: true },
       }),
     ]);
-    const sourceIds = new Set(sources.map((source) => source.id));
-    const sellerIds = new Set(sellers.map((seller) => seller.id));
-    const external = new Map<string, typeof leads>();
-    const internal = new Map<string, LeadImportRow[]>();
-    for (const lead of leads)
-      for (const key of [
-        lead.emailKey && `e:${lead.emailKey}`,
-        lead.phoneKey && `p:${lead.phoneKey}`,
-      ])
-        if (key) external.set(key, [...(external.get(key) ?? []), lead]);
-    for (const row of active) {
-      const key = contactKeys(row.email, row.phone);
-      for (const value of [
-        key.emailKey && `e:${key.emailKey}`,
-        key.phoneKey && `p:${key.phoneKey}`,
-      ])
-        if (value) internal.set(value, [...(internal.get(value) ?? []), row]);
-    }
-    const selectedKeys = new Set<string>();
-    const result = rows.map((row) => {
-      const key = contactKeys(row.email, row.phone);
-      const matches: Match[] = [];
-      for (const [kind, value] of [
-        ['email', key.emailKey && `e:${key.emailKey}`],
-        ['phone', key.phoneKey && `p:${key.phoneKey}`],
-      ] as const) {
-        if (!value) continue;
-        for (const lead of external.get(value) ?? [])
-          matches.push({ kind, leadId: lead.id, name: lead.name });
-        for (const other of (internal.get(value) ?? [])
-          .filter((other) => other.id !== row.id)
-          .slice(0, 20))
-          matches.push({
-            kind,
-            rowId: other.id,
-            name: other.name,
-            sheet: other.sheet,
-            rowNumber: other.rowNumber,
-          });
-      }
-      const errors = importContactErrors(row);
-      if (!row.sourceId || !sourceIds.has(row.sourceId))
-        errors.push('Confirmá un origen activo');
-      if (!row.assignmentResolved)
-        errors.push(
-          'Relacioná el asesor con un responsable o elegí reparto automático',
-        );
-      if (row.assignedToId && !sellerIds.has(row.assignedToId))
-        errors.push('El responsable no está disponible');
-      const active = batch.sheets.includes(row.sheet);
-      const values = [
-        key.emailKey && `e:${key.emailKey}`,
-        key.phoneKey && `p:${key.phoneKey}`,
-      ].filter((value): value is string => !!value);
-      const externalMatches = [
-        ...new Set(
-          matches.filter((match) => match.leadId).map((match) => match.leadId!),
+    const plan = planLeadImport(
+      rows,
+      batch.sheets,
+      leads.map((lead) => ({
+        ...lead,
+        sourceName: lead.source.name,
+        assignedToName: lead.assignedTo
+          ? [lead.assignedTo.firstName, lead.assignedTo.lastName]
+              .filter(Boolean)
+              .join(' ')
+          : 'Sin asignar',
+      })),
+      new Set(sources.map((source) => source.id)),
+      new Set(sellers.map((seller) => seller.id)),
+      new Set(appearances.map((entry) => entry.fingerprint)),
+      {
+        sources: new Map(sources.map((source) => [source.id, source.name])),
+        sellers: new Map(
+          sellers.map((seller) => [
+            seller.id,
+            [seller.firstName, seller.lastName].filter(Boolean).join(' '),
+          ]),
         ),
-      ].sort();
-      const duplicate = matches.length > 0;
-      const selected =
-        active &&
-        !row.leadId &&
-        row.decision !== 'OMIT' &&
-        (row.decision === 'INCLUDE' ||
-          (!externalMatches.length &&
-            !values.some((value) => selectedKeys.has(value))));
-      // Invalid candidates must not suppress the first valid row in their group.
-      if (active && (row.leadId || (selected && !errors.length)))
-        for (const value of values) selectedKeys.add(value);
-      const requiresReview =
-        active &&
-        !row.leadId &&
-        row.decision !== 'OMIT' &&
-        externalMatches.some((id) => !row.reviewedMatches.includes(id));
-      return {
-        ...row,
-        active,
-        errors,
-        matches,
-        externalMatches,
-        duplicate,
-        selected,
-        requiresReview,
-      };
-    });
-    return {
-      reviewToken: createHash('sha256')
-        .update(
-          JSON.stringify(result.map((row) => [row.id, row.externalMatches])),
-        )
-        .digest('hex'),
-      rows: result,
-      availableSheets: [...new Set(rows.map((row) => row.sheet))],
-      groups: [
-        ...new Set(active.map((row) => `${row.sheet}\u0000${row.group}`)),
-      ].map((key) => {
-        const [sheet, group] = key.split('\u0000');
-        const same = active.filter(
-          (row) => row.sheet === sheet && row.group === group && !row.leadId,
-        );
-        return {
-          sheet,
-          group,
-          sourceId:
-            same.length &&
-            same.every((row) => row.sourceId === same[0].sourceId)
-              ? same[0].sourceId
-              : null,
-        };
-      }),
-      advisors: [
-        ...new Set(
-          active
-            .filter((row) => row.advisor && !row.leadId)
-            .map((row) => row.advisor),
-        ),
-      ].map((advisor) => {
-        const same = active.filter(
-          (row) => row.advisor === advisor && !row.leadId,
-        );
-        return {
-          advisor,
-          resolved: same.every((row) => row.assignmentResolved),
-          assignedToId: same.every(
-            (row) => row.assignedToId === same[0].assignedToId,
-          )
-            ? same[0].assignedToId
-            : null,
-        };
-      }),
-      summary: {
-        imported: rows.filter((row) => row.leadId).length,
-        omitted: result.filter((row) => !row.leadId && !row.selected).length,
-        invalid: result.filter((row) => row.selected && row.errors.length)
-          .length,
-        pending: result.filter((row) => row.selected).length,
-        duplicates: result.filter(
-          (row) => row.active && row.duplicate && !row.leadId,
-        ).length,
-        requiresReview: result.some((row) => row.requiresReview),
       },
+    );
+    const active = rows.filter(
+      (row) => batch.sheets.includes(row.sheet) && !row.leadId,
+    );
+    const groups = new Map<string, LeadImportRow[]>();
+    const advisors = new Map<string, LeadImportRow[]>();
+    for (const row of active) {
+      const key = `${row.sheet}\u0000${row.group}`;
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+      if (row.advisor)
+        advisors.set(importKey(row.advisor), [
+          ...(advisors.get(importKey(row.advisor)) ?? []),
+          row,
+        ]);
+    }
+    return {
+      ...plan,
+      availableSheets: [...new Set(rows.map((row) => row.sheet))],
+      groups: [...groups.values()].map((same) => ({
+        sheet: same[0].sheet,
+        group: same[0].group,
+        sourceId: same.every((row) => row.sourceId === same[0].sourceId)
+          ? same[0].sourceId
+          : null,
+      })),
+      advisors: [...advisors.values()].map((same) => ({
+        advisor: same[0].advisor,
+        variants: [...new Set(same.map((row) => row.advisor))],
+        resolved: same.every((row) => row.assignmentResolved),
+        assignedToId: same.every(
+          (row) => row.assignedToId === same[0].assignedToId,
+        )
+          ? same[0].assignedToId
+          : null,
+      })),
     };
   }
+  private async resolveMappings(
+    tx: Tx,
+    rows: Awaited<ReturnType<typeof parseLeadImport>>['rows'],
+  ) {
+    const [rules, sources, users] = await Promise.all([
+      tx.leadImportMapping.findMany(),
+      tx.leadSource.findMany({ where: { isActive: true } }),
+      tx.user.findMany({
+        where: {
+          isActive: true,
+          deletedAt: null,
+          roles: { some: { role: { name: { in: ['ADMIN', 'VENDEDOR'] } } } },
+        },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    ]);
+    return resolveImportMappings(rows, rules, sources, users);
+  }
+
   private async acknowledge(
     tx: Tx,
     rows: Array<{
@@ -374,49 +330,62 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       reviewedMatches: string[];
     }>,
   ) {
-    for (const row of rows)
-      if (
-        row.externalMatches.join(',') !==
-        [...row.reviewedMatches].sort().join(',')
+    const changes = rows
+      .filter(
+        (row) =>
+          row.externalMatches.join(',') !==
+          [...row.reviewedMatches].sort().join(','),
       )
-        await tx.leadImportRow.update({
-          where: { id: row.id },
-          data: { reviewedMatches: row.externalMatches },
-        });
+      .map((row) => ({ id: row.id, matches: row.externalMatches }));
+    if (changes.length)
+      await tx.$executeRaw`
+      UPDATE lead_import_rows AS r SET "reviewedMatches" = ARRAY(SELECT jsonb_array_elements_text(v.matches))
+      FROM jsonb_to_recordset(${JSON.stringify(changes)}::jsonb) AS v(id text, matches jsonb)
+      WHERE r.id = v.id`;
   }
-  async get(id: string, actor: AuthenticatedUser, page = 1) {
-    return this.crm.write(async (tx) => {
-      const batch = await this.batch(tx, id, actor);
-      const preview = await this.analyze(tx, batch);
-      const items = preview.rows
-        .slice((page - 1) * 50, page * 50)
-        .map(
-          ({
-            reviewedMatches: _reviewed,
-            externalMatches: _external,
-            ...row
-          }) => {
-            void _reviewed;
-            void _external;
-            return row;
-          },
+  async get(id: string, actor: AuthenticatedUser, page = 1, filter = 'ALL') {
+    return this.db.$transaction(
+      async (tx) => {
+        const batch = await this.batch(tx, id, actor);
+        const preview = await this.analyze(tx, batch);
+        const filtered = preview.rows.filter(
+          (row) =>
+            filter === 'ALL' ||
+            (filter === 'DUPLICATES' && row.duplicate) ||
+            (filter === 'REVIEW' && row.action === 'REVIEW') ||
+            filter === row.action,
         );
-      return {
-        ...batch,
-        ...preview,
-        rows: undefined,
-        items,
-        page,
-        pageSize: 50,
-        rowTotal: preview.rows.length,
-      };
-    });
+        const items = filtered
+          .slice((page - 1) * 50, page * 50)
+          .map(
+            ({
+              reviewedMatches: _reviewed,
+              externalMatches: _external,
+              ...row
+            }) => {
+              void _reviewed;
+              void _external;
+              return row;
+            },
+          );
+        return {
+          ...batch,
+          ...preview,
+          rows: undefined,
+          items,
+          page,
+          pageSize: 50,
+          rowTotal: filtered.length,
+        };
+      },
+      { isolationLevel: 'RepeatableRead', timeout: 15_000 },
+    );
   }
   async patch(id: string, dto: ImportPatchDto, actor: AuthenticatedUser) {
     return this.crm.write(async (tx) => {
       const batch = await this.batch(tx, id, actor);
       this.version(batch.version, dto.version);
-      if (dto.duplicates)
+      if (dto.duplicates || dto.bulkCleanup)
         this.checkReview(
           (await this.analyze(tx, batch)).reviewToken,
           dto.reviewToken,
@@ -428,6 +397,30 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         throw new ConflictException(
           'La carga ya comenzó; solo podés revisar filas pendientes',
         );
+      if (dto.bulkCleanup) {
+        const preview = await this.analyze(tx, batch);
+        const kind = dto.bulkCleanup;
+        const changes = preview.rows
+          .filter((row) => canCleanOptionalContact(row, kind))
+          .map((row) => {
+            const cleaned = cleanOptionalContact(row, kind);
+            return {
+              id: row.id,
+              email: cleaned.email,
+              phone: cleaned.phone,
+              formulas: cleaned.formulaFields,
+              metadata: cleaned.metadata,
+            };
+          });
+        if (changes.length)
+          await tx.$executeRaw`
+          UPDATE lead_import_rows AS r SET email=v.email, phone=v.phone,
+            "formulaFields"=ARRAY(SELECT jsonb_array_elements_text(v.formulas)),
+            metadata=v.metadata, "reviewedMatches"=ARRAY[]::TEXT[]
+          FROM jsonb_to_recordset(${JSON.stringify(changes)}::jsonb)
+            AS v(id TEXT,email TEXT,phone TEXT,formulas JSONB,metadata JSONB)
+          WHERE r.id=v.id AND r."batchId"=${id} AND r."leadId" IS NULL`;
+      }
       if (dto.sheets) {
         const available = await tx.leadImportRow.findMany({
           where: { batchId: id },
@@ -453,24 +446,78 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           throw new BadRequestException('Origen no disponible');
         if (mapping.assignedToId)
           await this.validateManualResponsible(tx, mapping.assignedToId);
-        await tx.leadImportRow.updateMany({
+        const aliases = new Set(
+          [mapping.advisor ?? '', ...(mapping.aliases ?? [])].map(importKey),
+        );
+        const candidates = await tx.leadImportRow.findMany({
           where: {
             batchId: id,
             leadId: null,
             ...(mapping.sheet && { sheet: mapping.sheet }),
             ...(mapping.group !== undefined && { group: mapping.group }),
-            ...(mapping.advisor !== undefined && { advisor: mapping.advisor }),
-          },
-          data: {
-            ...(mapping.sourceId !== undefined && {
-              sourceId: mapping.sourceId,
-            }),
-            ...(mapping.assignedToId !== undefined && {
-              assignedToId: mapping.assignedToId,
-              assignmentResolved: true,
-            }),
           },
         });
+        const matched = candidates.filter((row) =>
+          mapping.advisor !== undefined
+            ? aliases.has(importKey(row.advisor))
+            : true,
+        );
+        if (mapping.sourceId !== undefined)
+          await tx.leadImportRow.updateMany({
+            where: { id: { in: matched.map((row) => row.id) } },
+            data: { sourceId: mapping.sourceId },
+          });
+        if (mapping.assignedToId !== undefined)
+          await tx.leadImportRow.updateMany({
+            where: {
+              id: {
+                in: matched
+                  .filter(
+                    (row) => mapping.advisor !== undefined || !row.advisor,
+                  )
+                  .map((row) => row.id),
+              },
+            },
+            data: {
+              assignedToId: mapping.assignedToId,
+              assignmentResolved: true,
+            },
+          });
+        if (mapping.remember !== false) {
+          const rules = [
+            ...(mapping.sourceId !== undefined && mapping.sheet
+              ? [
+                  {
+                    kind: 'ORIGIN',
+                    scope: mapping.sheet,
+                    key:
+                      mapping.group === undefined
+                        ? '*'
+                        : importKey(mapping.group),
+                  },
+                ]
+              : []),
+            ...(mapping.assignedToId !== undefined
+              ? mapping.advisor !== undefined
+                ? [...aliases]
+                    .filter(Boolean)
+                    .map((key) => ({ kind: 'ADVISOR', scope: '*', key }))
+                : mapping.sheet
+                  ? [{ kind: 'DEFAULT', scope: mapping.sheet, key: '*' }]
+                  : []
+              : []),
+          ];
+          for (const rule of rules)
+            await rememberImportMapping(
+              tx,
+              rule,
+              {
+                sourceId: mapping.sourceId,
+                assignedToId: mapping.assignedToId,
+              },
+              actor.id,
+            );
+        }
       }
       const updated = await tx.leadImportBatch.update({
         where: { id },
@@ -536,9 +583,11 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         reviewToken,
         acknowledgeDuplicates,
         assignedToId,
+        excludePending: _excludePending,
         ...data
       } = dto;
       void _version;
+      void _excludePending;
       const contactChanged =
         (dto.email !== undefined &&
           dto.email.trim().toLowerCase() !== row.email) ||
@@ -613,57 +662,168 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       });
     });
   }
-  async confirm(id: string, version: number, actor: AuthenticatedUser) {
+  async confirm(
+    id: string,
+    version: number,
+    actor: AuthenticatedUser,
+    excludePending = false,
+  ) {
     return this.crm.write(async (tx) => {
       const batch = await this.batch(tx, id, actor);
-      if (batch.status === 'COMPLETE')
-        return {
-          id,
-          status: 'COMPLETE',
-          version: batch.version,
-          imported: batch.imported,
-          omitted: batch.omitted,
-        };
+      if (batch.status === 'COMPLETE') return this.progress(batch);
       this.version(batch.version, version);
-      const preview = await this.analyze(tx, batch);
+      let preview = await this.analyze(tx, batch);
+      let excluded = 0;
+      if (excludePending) {
+        const ids = preview.rows
+          .filter((row) => row.action === 'REVIEW')
+          .map((row) => row.id);
+        excluded = ids.length;
+        await tx.leadImportRow.updateMany({
+          where: { id: { in: ids } },
+          data: { decision: 'OMIT' },
+        });
+        preview = await this.analyze(tx, batch);
+      }
       if (preview.summary.requiresReview)
         throw new ConflictException(
           'Aparecieron coincidencias nuevas. Revisalas y confirmá la revisión de duplicados',
         );
       if (preview.summary.invalid)
         throw new BadRequestException(
-          'Corregí u omití las filas con errores antes de importar',
+          'Corregí, omití o excluí explícitamente las excepciones pendientes',
         );
-      const selected = preview.rows.filter((row) => row.selected);
+      const selected = preview.rows
+        .filter((row) => row.selected)
+        .sort(
+          (a, b) =>
+            Number(b.action === 'CREATE') - Number(a.action === 'CREATE'),
+        );
+      const targets = new Map<string, string>();
+      let created = 0;
+      let merged = 0;
+      const updatedTargets = new Set<string>();
+      const previousUpdated = await tx.leadImportRow.findMany({
+        where: { batchId: id, outcome: 'UPDATE' },
+        select: { leadId: true },
+      });
+      const previousIds = new Set(previousUpdated.map((row) => row.leadId));
       for (const row of selected.slice(0, 100)) {
         const keys = contactKeys(row.email, row.phone);
-        const metadata = row.metadata as Prisma.InputJsonObject;
-        const lead = await this.crm.createLeadInTransaction(
-          tx,
-          {
-            name: row.name,
-            email: keys.emailKey ?? '',
-            phone: keys.phoneKey ?? '',
-            observations: row.observations,
-            sourceId: row.sourceId!,
-          },
-          actor,
-          {
-            assignedToId: row.assignedToId,
-            metadata: {
-              ...metadata,
+        let leadId = row.targetId ?? targets.get(row.leaderId);
+        let outcome = row.action;
+        if (!leadId && row.action === 'MERGE') {
+          const leader = await tx.leadImportRow.findUniqueOrThrow({
+            where: { id: row.leaderId },
+          });
+          leadId = leader.leadId ?? undefined;
+        }
+        if (!leadId && row.action === 'CREATE') {
+          const lead = await this.crm.createLeadInTransaction(
+            tx,
+            {
+              name: row.name,
+              email: keys.emailKey ?? '',
+              phone: keys.phoneKey ?? '',
+              observations: row.observations,
+              sourceId: row.sourceId!,
+            },
+            actor,
+            {
+              assignedToId: row.assignedToId,
+              metadata: {
+                ...(row.metadata as Prisma.InputJsonObject),
+                batchId: id,
+                sheet: row.sheet,
+                rowNumber: row.rowNumber,
+              },
               batchId: id,
               sheet: row.sheet,
               rowNumber: row.rowNumber,
             },
+          );
+          leadId = lead.id;
+          targets.set(row.id, lead.id);
+          created++;
+        } else if (leadId) {
+          const lead = await tx.lead.findUniqueOrThrow({
+            where: { id: leadId },
+          });
+          // Only fill empty contact fields. Never alter current commercial decisions.
+          await tx.lead.update({
+            where: { id: leadId },
+            data: {
+              ...(!lead.email &&
+                keys.emailKey && {
+                  email: keys.emailKey,
+                  emailKey: keys.emailKey,
+                }),
+              ...(!lead.phone &&
+                keys.phoneKey && {
+                  phone: keys.phoneKey,
+                  phoneKey: keys.phoneKey,
+                }),
+              version: { increment: 1 },
+            },
+          });
+          if (
+            row.action === 'MERGE' ||
+            previousIds.has(leadId) ||
+            updatedTargets.has(leadId) ||
+            preview.rows.some(
+              (other) => other.leadId === leadId && other.outcome === 'CREATE',
+            ) ||
+            [...targets.values()].includes(leadId)
+          ) {
+            merged++;
+            outcome = 'MERGE';
+          } else if (!previousIds.has(leadId)) updatedTargets.add(leadId);
+        }
+        if (!leadId)
+          throw new ConflictException(
+            'La consolidación cambió; actualizá la revisión',
+          );
+        await tx.leadImportAppearance.create({
+          data: {
+            fingerprint: row.fingerprint,
+            leadId,
             batchId: id,
+            fileName: batch.fileName,
             sheet: row.sheet,
             rowNumber: row.rowNumber,
+            sourceId: row.sourceId!,
+            original: {
+              name: row.name,
+              phone: row.phone,
+              email: row.email,
+              advisor: row.advisor,
+              observations: row.observations,
+              group: row.group,
+              ...(row.metadata as Prisma.InputJsonObject),
+            },
           },
-        );
+        });
+        if (outcome !== 'CREATE')
+          await tx.leadActivity.create({
+            data: {
+              leadId,
+              actorId: actor.id,
+              kind: 'imported_history',
+              detail: {
+                batchId: id,
+                sheet: row.sheet,
+                rowNumber: row.rowNumber,
+                fingerprint: row.fingerprint,
+                observations: row.observations,
+                historicalSourceId: row.sourceId,
+                fileName: batch.fileName,
+                history: row.metadata,
+              },
+            },
+          });
         await tx.leadImportRow.update({
           where: { id: row.id },
-          data: { leadId: lead.id },
+          data: { leadId, outcome },
         });
       }
       const complete = selected.length <= 100;
@@ -673,6 +833,10 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           status: complete ? 'COMPLETE' : 'IMPORTING',
           version: { increment: 1 },
           imported: { increment: Math.min(100, selected.length) },
+          created: { increment: created },
+          updated: { increment: updatedTargets.size },
+          merged: { increment: merged },
+          excluded: { increment: excluded },
           ...(complete && {
             completedAt: new Date(),
             omitted: preview.rows.filter((row) => !row.leadId && !row.selected)
@@ -680,13 +844,30 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           }),
         },
       });
-      return {
-        id,
-        status: updated.status,
-        version: updated.version,
-        imported: updated.imported,
-        omitted: updated.omitted,
-      };
+      return this.progress(updated);
     });
+  }
+  private progress(batch: {
+    id: string;
+    status: string;
+    version: number;
+    imported: number;
+    omitted: number;
+    created: number;
+    updated: number;
+    merged: number;
+    excluded: number;
+  }) {
+    return {
+      id: batch.id,
+      status: batch.status,
+      version: batch.version,
+      imported: batch.imported,
+      omitted: batch.omitted,
+      created: batch.created,
+      updated: batch.updated,
+      merged: batch.merged,
+      excluded: batch.excluded,
+    };
   }
 }

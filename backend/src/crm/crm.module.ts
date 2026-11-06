@@ -10,6 +10,8 @@ import { AttachmentsService } from './attachments.service';
 import { R2Service } from './r2.service';
 import { LeadImportService } from './lead-import.service';
 import { LeadImportController } from './lead-import.controller';
+import { ImportMappingController } from './import-mapping.controller';
+import { ImportMappingService } from './import-mapping.service';
 
 @Module({
   imports: [PrismaModule, UsersModule],
@@ -18,6 +20,7 @@ import { LeadImportController } from './lead-import.controller';
     CrmController,
     AttachmentsController,
     LeadImportController,
+    ImportMappingController,
   ],
   providers: [
     PipelineService,
@@ -25,6 +28,7 @@ import { LeadImportController } from './lead-import.controller';
     AttachmentsService,
     R2Service,
     LeadImportService,
+    ImportMappingService,
   ],
 })
 export class CrmModule {}

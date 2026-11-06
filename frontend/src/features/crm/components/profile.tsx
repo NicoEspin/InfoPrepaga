@@ -36,6 +36,7 @@ import {
 } from './shared';
 import { LeadForm } from './lead-form';
 import { TaskForm } from './task-form';
+import { ImportAppearances } from '@/features/lead-imports/components/import-appearances';
 import { Attachments } from './attachments';
 
 const format = new Intl.DateTimeFormat('es-AR', {
@@ -45,6 +46,8 @@ const format = new Intl.DateTimeFormat('es-AR', {
 });
 const titles: Record<string, string> = {
   registered: 'Lead creado',
+  imported: 'Importación Excel',
+  imported_history: 'Historia incorporada desde Excel',
   assigned: 'Asignación',
   edited: 'Datos actualizados',
   status: 'Cambio de estado',
@@ -161,30 +164,7 @@ export function CommercialProfileModal({
                 />
               </div>
             </div>
-            {lead.importData && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Datos de importación</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <dl className='grid gap-2 sm:grid-cols-2'>
-                    {[
-                      ['sheet', 'Hoja'],
-                      ['rowNumber', 'Fila'],
-                      ['originalDate', 'Fecha original'],
-                      ['schedule', 'Horario de contacto'],
-                      ['segment', 'Segmento / régimen'],
-                      ['originalAdvisor', 'Asesor original']
-                    ].map(([key, label]) => (
-                      <div key={key}>
-                        <dt className='text-muted-foreground text-sm'>{label}</dt>
-                        <dd>{lead.importData?.[key] || 'Sin dato'}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </CardContent>
-              </Card>
-            )}
+            <ImportAppearances key={leadId} actorId={actor.id} leadId={leadId} />
             <Attachments leadId={leadId} actorId={actor.id} />
             <div className='grid gap-4 md:grid-cols-2'>
               <Card>
@@ -397,6 +377,15 @@ export function CommercialProfileModal({
                                   ? 'Sistema'
                                   : personName(item.actor)}
                               </p>
+                              {['imported', 'imported_history'].includes(item.kind) && (
+                                <div>
+                                  <p>
+                                    {String(item.detail.sheet ?? '')} · Fila{' '}
+                                    {String(item.detail.rowNumber ?? '')}
+                                  </p>
+                                  <p>{String(item.detail.observations ?? '')}</p>
+                                </div>
+                              )}
                               {item.kind === 'note' && (
                                 <p className='whitespace-pre-wrap'>
                                   {String(item.detail.text ?? '')}

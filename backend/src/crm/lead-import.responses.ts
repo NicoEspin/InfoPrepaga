@@ -15,6 +15,8 @@ const metadata = object({
   schedule: text,
   segment: text,
   originalAdvisor: text,
+  originalPhone: text,
+  nameColumns: text,
 });
 const match = object(
   {
@@ -28,6 +30,46 @@ const match = object(
   ['kind', 'name'],
 );
 const row = object({
+  action: {
+    type: 'string',
+    enum: ['CREATE', 'UPDATE', 'MERGE', 'SKIP', 'REVIEW'],
+  },
+  state: {
+    type: 'string',
+    enum: ['READY', 'READY_UPDATE', 'CONFIGURATION', 'CORRECTION', 'SKIP'],
+  },
+  contactErrors: array(text),
+  configurationErrors: array(text),
+  conflicts: array(text),
+  conflictReasons: array(text),
+  replay: bool,
+  targetId: nullable(uuid),
+  fingerprint: text,
+  leaderId: uuid,
+  outcome: nullable(text),
+  changes: object({ add: array(text), preserve: array(text) }),
+  comparisons: array(
+    object({
+      kind: { type: 'string', enum: ['CRM', 'FILE'] },
+      referenceId: uuid,
+      canApply: bool,
+      fields: array(
+        object({
+          field: text,
+          label: text,
+          current: nullable(text),
+          incoming: nullable(text),
+          result: nullable(text),
+          action: {
+            type: 'string',
+            enum: ['PRESERVE', 'ADD', 'HISTORY', 'CONFLICT', 'REVIEW'],
+          },
+          reason: text,
+        }),
+      ),
+    }),
+  ),
+  comparisonCount: number,
   id: uuid,
   batchId: uuid,
   sheet: text,
@@ -69,6 +111,10 @@ const schemas = {
     }),
   ),
   progress: object({
+    created: number,
+    updated: number,
+    merged: number,
+    excluded: number,
     id: uuid,
     status: { type: 'string', enum: ['IMPORTING', 'COMPLETE'] },
     version: number,
@@ -93,15 +139,35 @@ const schemas = {
       object({ sheet: text, group: text, sourceId: nullable(uuid) }),
     ),
     advisors: array(
-      object({ advisor: text, resolved: bool, assignedToId: nullable(uuid) }),
+      object({
+        advisor: text,
+        variants: array(text),
+        resolved: bool,
+        assignedToId: nullable(uuid),
+      }),
     ),
     summary: object({
+      detected: number,
+      uniqueContacts: number,
+      creates: number,
+      updates: number,
+      internalMatches: number,
+      review: number,
+      configuration: number,
+      contactErrors: number,
+      merged: number,
       imported: number,
       omitted: number,
       invalid: number,
       pending: number,
       duplicates: number,
       requiresReview: bool,
+      unreviewedReady: number,
+      cleanupCandidates: object({
+        INVALID_EMAIL: number,
+        INVALID_PHONE: number,
+        FORMULA_PHONE: number,
+      }),
     }),
   }),
 };

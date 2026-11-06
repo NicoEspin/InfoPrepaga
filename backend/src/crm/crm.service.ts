@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { leadScope, taskScope } from './access';
 import { leadStatuses } from './catalogs';
 import { contactKeys } from './contact-keys';
+import { PeriodicJobLog } from '../common/periodic-job-log';
 import {
   AssignmentDto,
   CreateLeadDto,
@@ -52,6 +53,7 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
   private stopping = false;
+  private readonly jobLog = new PeriodicJobLog();
 
   constructor(
     private readonly accounts: AccountsService,
@@ -71,12 +73,9 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
   private schedulePending() {
     if (this.running || this.stopping) return;
     this.running = this.distributePending()
-      .then(() => undefined)
-      .catch(() => {
-        // Do not log raw database errors or records.
-        this.logger.error(
-          'No se pudo procesar el reparto pendiente; se reintentará.',
-        );
+      .then(() => this.jobLog.success(this.logger, 'pending-assignment'))
+      .catch((error: unknown) => {
+        this.jobLog.failure(this.logger, 'pending-assignment', error);
       })
       .finally(() => {
         this.running = undefined;
@@ -94,6 +93,22 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
         if (state.length !== 1)
           throw new Error('Missing commercial migration lock row');
         return action(tx);
+      },
+      { maxWait: 10_000, timeout: 15_000 },
+    );
+  }
+  async maintenanceWrite<T>(action: (tx: Tx) => Promise<T>) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const state = await tx.$queryRaw<
+          { id: number }[]
+        >`SELECT id FROM assignment_state WHERE id = 1 FOR UPDATE SKIP LOCKED`;
+        if (!state.length) {
+          if (!(await tx.assignmentState.findUnique({ where: { id: 1 } })))
+            throw new Error('Missing commercial migration lock row');
+          return { busy: true as const };
+        }
+        return { busy: false as const, value: await action(tx) };
       },
       { maxWait: 10_000, timeout: 15_000 },
     );
@@ -194,7 +209,11 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
     return assigned;
   }
   async distributePending() {
-    return this.write((tx) => this.drain(tx));
+    // Idle maintenance must not queue behind a long-running commercial import.
+    if (!(await this.prisma.lead.count({ where: { assignedToId: null } })))
+      return 0;
+    const result = await this.maintenanceWrite((tx) => this.drain(tx));
+    return result.busy ? 0 : result.value;
   }
 
   async catalogs(actor: AuthenticatedUser) {
@@ -340,6 +359,98 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
           include: taskInclude,
         });
         return { ...lead, nextActivity };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+  }
+  async importAppearances(
+    id: string,
+    query: PageDto,
+    actor: AuthenticatedUser,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const lead = await this.visibleLead(tx, id, actor);
+        const [records, total] = await Promise.all([
+          tx.leadImportAppearance.findMany({
+            where: { leadId: id },
+            include: {
+              source: { select: { id: true, name: true, isActive: true } },
+            },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            skip: (query.page - 1) * query.pageSize,
+            take: query.pageSize,
+          }),
+          tx.leadImportAppearance.count({ where: { leadId: id } }),
+        ]);
+        const items = records.map((entry) => {
+          const original =
+            entry.original &&
+            typeof entry.original === 'object' &&
+            !Array.isArray(entry.original)
+              ? entry.original
+              : {};
+          const value = (key: string) =>
+            typeof original[key] === 'string' ? original[key] : '';
+          return {
+            id: entry.id,
+            fileName: entry.fileName,
+            batchId: entry.batchId,
+            sheet: entry.sheet,
+            rowNumber: entry.rowNumber,
+            source: entry.source,
+            originalAdvisor: value('originalAdvisor') || value('advisor'),
+            observations: value('observations'),
+            originalDate: value('originalDate'),
+            group: value('group'),
+            corrections:
+              original.reviewedOriginal &&
+              typeof original.reviewedOriginal === 'object' &&
+              !Array.isArray(original.reviewedOriginal)
+                ? {
+                    email:
+                      typeof original.reviewedOriginal.email === 'string'
+                        ? original.reviewedOriginal.email
+                        : null,
+                    phone:
+                      typeof original.reviewedOriginal.phone === 'string'
+                        ? original.reviewedOriginal.phone
+                        : null,
+                    formulaPhoneOmitted:
+                      original.reviewedOriginal.formulaPhoneOmitted === true,
+                  }
+                : null,
+            createdAt: entry.createdAt,
+          };
+        });
+        const legacy =
+          lead.importData &&
+          typeof lead.importData === 'object' &&
+          !Array.isArray(lead.importData)
+            ? lead.importData
+            : null;
+        const represented =
+          legacy &&
+          typeof legacy.batchId === 'string' &&
+          typeof legacy.sheet === 'string' &&
+          typeof legacy.rowNumber === 'number'
+            ? await tx.leadImportAppearance.findFirst({
+                where: {
+                  leadId: id,
+                  batchId: legacy.batchId,
+                  sheet: legacy.sheet,
+                  rowNumber: legacy.rowNumber,
+                },
+                select: { id: true },
+              })
+            : null;
+        return {
+          items,
+          total,
+          page: query.page,
+          pageSize: query.pageSize,
+          legacy: represented ? null : legacy,
+        };
       },
       { isolationLevel: 'RepeatableRead' },
     );

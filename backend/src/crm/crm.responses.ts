@@ -67,6 +67,34 @@ const task = object({
   owner: identity,
 });
 const schemas = {
+  appearances: object({
+    items: array(
+      object({
+        id: uuid,
+        fileName: str,
+        batchId: uuid,
+        sheet: str,
+        rowNumber: int,
+        source: object({ id: uuid, name: str, isActive: bool }),
+        originalAdvisor: str,
+        corrections: nullable(
+          object({
+            email: nullable(str),
+            phone: nullable(str),
+            formulaPhoneOmitted: bool,
+          }),
+        ),
+        observations: str,
+        originalDate: str,
+        group: str,
+        createdAt: date,
+      }),
+    ),
+    total: int,
+    page: int,
+    pageSize: int,
+    legacy: nullable({ type: 'object', additionalProperties: true }),
+  }),
   source,
   lead: object(leadProperties),
   task,

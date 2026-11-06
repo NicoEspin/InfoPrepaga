@@ -12,9 +12,11 @@ const routes: Record<string, RegExp[]> = {
     /^users$/,
     /^leads$/,
     /^lead-imports$/,
+    /^import-mappings$/,
     new RegExp(`^lead-imports/${uuid}$`),
     new RegExp(`^leads/${uuid}$`),
     new RegExp(`^leads/${uuid}/history$`),
+    new RegExp(`^leads/${uuid}/import-appearances$`),
     new RegExp(`^leads/${uuid}/attachments(?:/${uuid}/download)?$`),
     /^tasks$/
   ],
@@ -30,6 +32,7 @@ const routes: Record<string, RegExp[]> = {
     new RegExp(`^leads/${uuid}/attachments$`)
   ],
   PATCH: [
+    /^import-mappings$/,
     new RegExp(`^pipeline/${uuid}$`),
     new RegExp(`^lead-imports/${uuid}(?:/rows/${uuid})?$`),
     new RegExp(`^leads/${uuid}/attachments/${uuid}$`),
@@ -38,7 +41,7 @@ const routes: Record<string, RegExp[]> = {
     new RegExp(`^users/${uuid}$`),
     new RegExp(`^sources/${uuid}$`)
   ],
-  DELETE: [new RegExp(`^leads/${uuid}/attachments/${uuid}$`)]
+  DELETE: [/^import-mappings$/, new RegExp(`^leads/${uuid}/attachments/${uuid}$`)]
 };
 
 export async function handle(
@@ -71,7 +74,10 @@ export async function handle(
         ? 128 * 1024
         : 16_384;
     const contentType = request.headers.get('content-type') ?? '';
-    if (request.method !== 'GET' && request.method !== 'DELETE') {
+    if (
+      request.method !== 'GET' &&
+      (request.method !== 'DELETE' || endpoint === 'import-mappings')
+    ) {
       if (
         upload
           ? !contentType.startsWith('multipart/form-data;')

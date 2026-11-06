@@ -13,6 +13,74 @@ import { ImportPatchDto, ImportRowPatchDto } from './lead-import.dto';
 const file = async (book: ExcelJS.Workbook) =>
   Buffer.from(await book.xlsx.writeBuffer());
 describe('Lead Excel adapters', () => {
+  it('classifies PIPA labels, ignores summaries and preserves original advisor and phone', async () => {
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet('PIPA');
+    sheet.addRow(['MARZO']);
+    sheet.addRow(['FECHA', 'NOMBRE', 'TEL']);
+    sheet.addRow([
+      '5/8',
+      'Contacto sintético',
+      '0351 15 234 5678',
+      null,
+      null,
+      null,
+      ' ip LAN ',
+    ]);
+    sheet.addRow([null, 'TOTAL']);
+    sheet.getCell('AB3').value = 'Administrativo';
+    const result = await parseLeadImport(await file(book));
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      advisor: '',
+      group: 'Datos IP',
+      metadata: {
+        originalAdvisor: 'ip LAN',
+        originalPhone: '0351 15 234 5678',
+        originalDate: '5/8',
+      },
+    });
+    expect(result.discarded.map((item) => item.reason)).toContain(
+      'Resumen sin contacto',
+    );
+    expect(result.warnings).toHaveLength(1);
+  });
+  it('accepts equivalent LAN names but keeps multiple channels unresolved without artificial combinations', async () => {
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet('DATOS LAN');
+    sheet.addRow([
+      null,
+      'Contacto sintético',
+      ' CONTACTO SINTÉTICO ',
+      null,
+      null,
+      '011 15 2345-6789',
+    ]);
+    const result = await parseLeadImport(await file(book));
+    expect(result.rows[0]).toMatchObject({
+      nameResolved: true,
+      group: 'Canal por resolver',
+      metadata: { nameColumns: 'B,C' },
+    });
+    expect(result.rows[0].group).not.toContain('/');
+  });
+  it.each([
+    ['011 15 2345-6789', '+5491123456789'],
+    ['+54 9 11 2345 6789', '+5491123456789'],
+    ['54 9 11 2345 6789', '+5491123456789'],
+    ['0351 15 234 5678', '+5493512345678'],
+    ['0341 15 234 5678', '+5493412345678'],
+    ['0299 15 412 3456', '+5492994123456'],
+    ['15 2345 6789', null],
+    ['123', null],
+    ['Llamar al 011 15 2345-6789', null],
+    ['11 2345 6789 / 11 2345 6790', null],
+  ])(
+    'normalizes complete synthetic phone %s without inventing area codes',
+    (phone, expected) => {
+      expect(contactKeys(null, phone).phoneKey).toBe(expected);
+    },
+  );
   it('maps five layouts, PIPA shifted headers, incomplete dates and extra blocks', async () => {
     const book = new ExcelJS.Workbook();
     const lan = book.addWorksheet('DATOS LAN');

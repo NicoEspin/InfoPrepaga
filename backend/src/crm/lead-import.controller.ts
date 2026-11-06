@@ -94,10 +94,23 @@ export class LeadImportController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @CurrentUser() actor: AuthenticatedUser,
+    @Query('filter', new DefaultValuePipe('ALL')) filter: string,
   ) {
     if (page < 1 || page > 100)
       throw new BadRequestException('Página inválida');
-    return this.imports.get(id, actor, page);
+    if (
+      ![
+        'ALL',
+        'CREATE',
+        'UPDATE',
+        'MERGE',
+        'DUPLICATES',
+        'REVIEW',
+        'SKIP',
+      ].includes(filter)
+    )
+      throw new BadRequestException('Filtro inválido');
+    return this.imports.get(id, actor, page, filter);
   }
   @Patch(':id')
   @ImportResponse('changed')
@@ -146,6 +159,6 @@ export class LeadImportController {
     @Body() dto: ImportVersionDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.imports.confirm(id, dto.version, actor);
+    return this.imports.confirm(id, dto.version, actor, dto.excludePending);
   }
 }

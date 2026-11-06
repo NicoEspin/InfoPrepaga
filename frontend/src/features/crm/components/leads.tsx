@@ -70,16 +70,29 @@ export function CommercialLeads({ actor }: { actor: Identity }) {
   return (
     <CrmContent>
       <div className='leads-content'>
-        <div className='leads-heading'>
-          <h1>Gestión de leads</h1>
-          <p>
-            {admin
-              ? 'Administrá tu cartera y el reparto comercial.'
-              : 'Tus prospectos asignados y su seguimiento.'}
-          </p>
+        <div className='leads-heading mb-6 flex flex-wrap items-center justify-between gap-4'>
+          <div>
+            <h1>Gestión de leads</h1>
+            <p>
+              {admin
+                ? 'Administrá tu cartera y el reparto comercial.'
+                : 'Tus prospectos asignados y su seguimiento.'}
+            </p>
+          </div>
+          {admin && (
+            <div className='ml-auto flex shrink-0 flex-wrap justify-end gap-2'>
+              <Button variant='outline' onClick={() => setImportOpen(true)}>
+                Importar Excel
+              </Button>
+              <Button disabled={!catalogs.data} onClick={() => setEditor({})}>
+                Nuevo lead
+              </Button>
+            </div>
+          )}
         </div>
-        <div className='leads-toolbar'>
+        <div className='flex flex-wrap items-center gap-3'>
           <Input
+            className='w-full sm:min-w-64 sm:flex-1'
             aria-label='Buscar leads'
             placeholder='Nombre, contacto o empresa'
             value={search}
@@ -131,7 +144,7 @@ export function CommercialLeads({ actor }: { actor: Identity }) {
                     </NativeSelectOption>
                   ))}
               </NativeSelect>
-              <label className='flex items-center gap-2'>
+              <label className='flex shrink-0 items-center gap-2'>
                 <input
                   type='checkbox'
                   checked={filters.unassigned === 'true'}
@@ -140,16 +153,6 @@ export function CommercialLeads({ actor }: { actor: Identity }) {
                 Sin asignar
               </label>
             </>
-          )}
-          {admin && (
-            <Button variant='outline' onClick={() => setImportOpen(true)}>
-              Importar Excel
-            </Button>
-          )}
-          {admin && (
-            <Button disabled={!catalogs.data} onClick={() => setEditor({})}>
-              Nuevo lead
-            </Button>
           )}
         </div>
         <div className='flex flex-wrap items-center gap-3 py-3'>

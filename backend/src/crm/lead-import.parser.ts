@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { contactKeys } from './contact-keys';
 import { isEmail } from 'class-validator';
 import { inflateRawSync } from 'node:zlib';
+import { historicalLabel, importKey } from './import-normalization';
 
 export const IMPORT_SHEETS = [
   'DATOS LAN',
@@ -29,6 +30,8 @@ export type ParsedImportRow = {
     schedule: string;
     segment: string;
     originalAdvisor: string;
+    originalPhone: string;
+    nameColumns: string;
   };
 };
 const clean = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -142,6 +145,8 @@ export async function parseLeadImport(buffer: Buffer) {
   const rows: ParsedImportRow[] = [];
   const warnings = new Set<string>();
   const sheets: string[] = [];
+  const discarded: Array<{ sheet: string; rowNumber: number; reason: string }> =
+    [];
   for (const sheet of book.worksheets) {
     const canonical = IMPORT_SHEETS.find(
       (name) => name.toLowerCase() === sheet.name.trim().toLowerCase(),
@@ -202,42 +207,71 @@ export async function parseLeadImport(buffer: Buffer) {
       const phoneColumn = lan ? 6 : 3;
       const emailColumn = lan ? 8 : face || leaflet ? 0 : 5;
       const names = nameColumns.map(v).filter(Boolean);
+      const uniqueNames = [
+        ...new Map(names.map((name) => [importKey(name), name])).values(),
+      ];
       const phone = v(phoneColumn);
       // Recognize structural rows, including PIPA's decorative month above its header.
       if (
         /^(tel|telefono|teléfono)$/i.test(phone) ||
         /^(nombre|nombre y apellido)$/i.test(v(2)) ||
         (lan && /datos lan/i.test(v(2))) ||
-        (canonical === 'PIPA' &&
-          /^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)$/i.test(
-            [1, 2, 3, 4, 5, 6, 7].map(v).join(''),
-          ))
+        /^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)$/i.test(
+          [1, 2, 3, 4, 5, 6, 7].map(v).join(''),
+        )
       ) {
+        discarded.push({
+          sheet: canonical,
+          rowNumber,
+          reason: 'Encabezado o título mensual',
+        });
+        return;
+      }
+      if (
+        /^(total(?:es)?|subtotal|resumen|inversion|inversión|cantidad|promedio)$/i.test(
+          v(2),
+        ) &&
+        !phone &&
+        !v(emailColumn)
+      ) {
+        discarded.push({
+          sheet: canonical,
+          rowNumber,
+          reason: 'Resumen sin contacto',
+        });
         return;
       }
       const email = emailColumn ? v(emailColumn).toLowerCase() : '';
-      if (!names.length && !phone && !email && !formulaFields.length) return;
+      if (!names.length && !phone && !email && !formulaFields.length) {
+        discarded.push({
+          sheet: canonical,
+          rowNumber,
+          reason: 'Sin contacto en el bloque principal',
+        });
+        return;
+      }
       if (rows.length >= 5000)
         throw new BadRequestException(
           'El archivo supera 5.000 filas candidatas',
         );
-      const advisor = v(lan ? 10 : face ? 1 : leaflet ? 5 : 7);
+      const originalAdvisor = v(lan ? 10 : face ? 1 : leaflet ? 5 : 7);
+      const label =
+        canonical === 'PIPA' ? historicalLabel(originalAdvisor) : undefined;
+      const advisor = label ? '' : originalAdvisor;
       const group = lan
-        ? nameColumns
-            .filter((column) => v(column))
-            .map(
-              (column) =>
-                ['Datos Lan', 'Whatsapp', 'Datos Ip', 'face Meta'][column - 2],
-            )
-            .join(' / ') || 'Sin grupo'
-        : canonical;
+        ? names.length === 1
+          ? ['Datos Lan', 'Whatsapp', 'Datos Ip', 'Meta'][
+              nameColumns.find((column) => v(column))! - 2
+            ]
+          : 'Canal por resolver'
+        : (label ?? canonical);
       rows.push({
         sheet: canonical,
         rowNumber,
         group,
-        name: names.length === 1 ? names[0] : '',
+        name: uniqueNames.length === 1 ? uniqueNames[0] : '',
         nameCandidates: names,
-        nameResolved: names.length <= 1,
+        nameResolved: uniqueNames.length <= 1,
         formulaFields: [...new Set(formulaFields)],
         phone,
         email,
@@ -247,7 +281,12 @@ export async function parseLeadImport(buffer: Buffer) {
           originalDate: v(face ? 4 : 1),
           schedule: face || leaflet ? '' : v(lan ? 7 : 4),
           segment: face ? '' : v(lan ? 9 : leaflet ? 4 : 6),
-          originalAdvisor: advisor,
+          originalAdvisor,
+          originalPhone: phone,
+          nameColumns: nameColumns
+            .filter((column) => v(column))
+            .map((column) => String.fromCharCode(64 + column))
+            .join(','),
         },
       });
     });
@@ -256,7 +295,7 @@ export async function parseLeadImport(buffer: Buffer) {
     throw new BadRequestException(
       'No encontramos contactos en las hojas admitidas',
     );
-  return { rows, sheets, warnings: [...warnings] };
+  return { rows, sheets, warnings: [...warnings], discarded };
 }
 
 export function importContactErrors(row: {

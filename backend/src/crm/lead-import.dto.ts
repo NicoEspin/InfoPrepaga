@@ -25,8 +25,26 @@ export class ImportVersionDto {
   @ValidateIf((_o, v: unknown) => v !== undefined)
   @IsHash('sha256')
   reviewToken?: string;
+  @ApiPropertyOptional({
+    description:
+      'Excluir explícitamente las excepciones pendientes al confirmar',
+  })
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsBoolean()
+  excludePending?: boolean;
 }
 export class ImportMappingDto {
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsBoolean()
+  remember?: boolean;
+  @ApiPropertyOptional({ type: [String] })
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(160, { each: true })
+  aliases?: string[];
   @ApiPropertyOptional()
   @ValidateIf((_o, v: unknown) => v !== undefined)
   @IsIn(IMPORT_SHEETS)
@@ -54,6 +72,14 @@ export class ImportMappingDto {
   assignedToId?: string | null;
 }
 export class ImportPatchDto extends ImportVersionDto {
+  @ApiPropertyOptional({
+    enum: ['INVALID_EMAIL', 'INVALID_PHONE', 'FORMULA_PHONE'],
+    description:
+      'Descartar un campo opcional incorrecto conservando el original; requiere reviewToken actual',
+  })
+  @ValidateIf((_o, value: unknown) => value !== undefined)
+  @IsIn(['INVALID_EMAIL', 'INVALID_PHONE', 'FORMULA_PHONE'])
+  bulkCleanup?: 'INVALID_EMAIL' | 'INVALID_PHONE' | 'FORMULA_PHONE';
   @ApiPropertyOptional({ enum: IMPORT_SHEETS, isArray: true })
   @ValidateIf((_o, v: unknown) => v !== undefined)
   @IsArray()

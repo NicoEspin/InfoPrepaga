@@ -171,7 +171,7 @@ try {
   const importSheet = importBook.addWorksheet('Fede');
   importSheet.addRow(['FECHA', 'NOMBRE', 'TEL', 'HORARIO', 'MAIL', 'SEGMENTO', 'ASESOR', 'OBSERVACION']);
   importSheet.addRow(['2/8', 'Importado BFF uno', '', 'Tarde', 'import-bff@example.test', 'Grupo', '', 'Nota']);
-  importSheet.addRow(['2/8', 'Importado BFF repetido', '', '', 'IMPORT-BFF@example.test']);
+  importSheet.addRow(['2/8', 'Importado BFF uno', '', '', 'IMPORT-BFF@example.test']);
   const importBytes = await importBook.xlsx.writeBuffer();
   function importFileOptions(cookie, origin = web) {
     const body = new FormData(); body.set('file', new Blob([importBytes]), 'synthetic.xlsx');
@@ -188,8 +188,10 @@ try {
   assert.equal(importPreview.items.length, 2);
   await check(importPath, 200, json({ version: importPreview.version, mappings: [{ sheet: 'Fede', sourceId }] }, adminCookies, 'PATCH'));
   importPreview = await (await check(importPath, 200, cookies(adminCookies))).json();
-  assert.equal(importPreview.summary.pending, 1);
-  assert.equal(importPreview.summary.omitted, 1);
+  assert.equal(importPreview.summary.pending, 2);
+  assert.equal(importPreview.summary.creates, 1);
+  assert.equal(importPreview.summary.merged, 1);
+  assert.equal(importPreview.summary.omitted, 0);
   await check(importPath, 403, json({ version: importPreview.version }, vendorCookies, 'PATCH'));
   await check(`${importPath}/rows/${importPreview.items[0].id}`, 403, json({ version: importPreview.version, decision: 'OMIT' }, vendorCookies, 'PATCH'));
   await check(`${importPath}/review`, 403, json({ version: importPreview.version }, vendorCookies));
@@ -200,8 +202,20 @@ try {
   assert.equal(importResult.imported, 2);
   await check(`${importPath}/confirm`, 201, json({ version: importPreview.version }, adminCookies));
   const imported = await db.lead.findMany({ where: { emailKey: 'import-bff@example.test' } });
-  assert.equal(imported.length, 2);
+  assert.equal(imported.length, 1);
+  assert.equal(await db.leadImportAppearance.count({where: {batchId: importedBatch.id}}), 2);
   assert(imported.every((entry) => entry.importData.originalDate === '2/8'));
+  const mappingPath=`${web}/api/crm/import-mappings`;
+  await check(mappingPath,401); await check(mappingPath,403,cookies(vendorCookies));
+  const mappings=await (await check(mappingPath,200,cookies(adminCookies))).json();
+  const mapping=mappings.items.find((entry)=>entry.kind==='ORIGIN'&&entry.scope==='Fede'); assert(mapping);
+  const mappingIdentity={kind:mapping.kind,scope:mapping.scope,key:mapping.key,expectedUpdatedAt:mapping.updatedAt};
+  await check(mappingPath,403,json(mappingIdentity,vendorCookies,'DELETE'));
+  for(const method of ['PATCH','DELETE']) {const forged=json(mappingIdentity,adminCookies,method);forged.headers.Origin='https://attacker.invalid';await check(mappingPath,403,forged);}
+  const provenance=await (await check(`${web}/api/crm/leads/${imported[0].id}/import-appearances`,200,cookies(adminCookies))).json();assert.equal(provenance.total,2);assert.equal(provenance.legacy,null);
+  await check(`${web}/api/crm/leads/${imported[0].id}/import-appearances`,401);
+  const privateHistory=await db.lead.create({data:{name:'BFF provenance scope synthetic',email:'private-provenance@example.test',sourceId}});
+  await check(`${web}/api/crm/leads/${privateHistory.id}/import-appearances`,404,cookies(vendorCookies));
   const oversizedImport = new FormData(); oversizedImport.set('file', new Blob([new Uint8Array(10 * 1024 * 1024 + 8192)]), 'oversized.xlsx');
   await check(`${web}/api/crm/lead-imports`, 413, { method: 'POST', headers: { Cookie: adminCookies, Origin: web }, body: oversizedImport });
   await check(`${web}/api/auth/logout`, 200, json({}, vendorCookies));
@@ -217,6 +231,9 @@ try {
   const rotatedCookies=rotated.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
   await check(`${web}/api/admin/users`,200,cookies(rotatedCookies));
   await check(`${web}/api/crm/session`,401,cookies(adminCookies));
+  if (process.env.CRM_RUN_IMPORT_UI === 'true') {
+    execFileSync(process.execPath, [path.join(root, 'scripts/verify-import-ui.cjs')], {env:process.env,stdio:'inherit',timeout:180000});
+  }
   console.log(`PASS: ${checks} BFF, CSRF, production pages, contracts and persistence checks with Node ${process.version}`);
   if (process.env.CRM_BROWSER_PREVIEW === 'true') {
     // Deliberately synthetic credentials. Never use real accounts in this harness.
