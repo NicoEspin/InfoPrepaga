@@ -146,11 +146,26 @@ export class ReportsService {
     assertAdmin(actor);
     return this.prisma.$transaction(
       async (tx) => ({
-        items: await tx.commercialReport.findMany({
-          select: { id: true, name: true, generatedAt: true, authorId: true },
-          orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
-          skip: (query.page - 1) * query.pageSize,
-          take: query.pageSize,
+        items: (
+          await tx.commercialReport.findMany({
+            select: {
+              id: true,
+              name: true,
+              generatedAt: true,
+              authorId: true,
+              snapshot: true,
+            },
+            orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
+            skip: (query.page - 1) * query.pageSize,
+            take: query.pageSize,
+          })
+        ).map(({ snapshot, ...report }) => {
+          const period = snapshot as Pick<Snapshot, 'from' | 'to'> | null;
+          return {
+            ...report,
+            from: period?.from ?? null,
+            to: period?.to ?? null,
+          };
         }),
         total: await tx.commercialReport.count(),
         page: query.page,
@@ -224,7 +239,7 @@ export class ReportsService {
       )`;
     // Reuse the historical ownership/date scope for metrics and diagnostics.
     const enteredScope = Prisma.sql`
-      l."createdAt" >= (${range.start}::timestamptz AT TIME ZONE 'UTC')
+      l."intakeMode" = 'NEW' AND l."createdAt" >= (${range.start}::timestamptz AT TIME ZONE 'UTC')
       AND l."createdAt" < (${range.end}::timestamptz AT TIME ZONE 'UTC')
       AND l."createdAt" <= (${now}::timestamptz AT TIME ZONE 'UTC')
       AND (${dto.responsibleIds.length === 0} OR

@@ -2,6 +2,10 @@ import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   IsBoolean,
+  IsArray,
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  ValidateNested,
   IsEmail,
   IsIn,
   IsInt,
@@ -40,6 +44,16 @@ export class PageDto {
 }
 
 export class LeadQueryDto extends PageDto {
+  @ApiPropertyOptional({
+    enum: ['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED', 'ALL'],
+  })
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsIn(['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED', 'ALL'])
+  portfolioClass?: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED' | 'ALL';
+  @ApiPropertyOptional({ description: 'Lote de importación propio (ADMIN)' })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsUUID()
+  importBatchId?: string;
   @ApiPropertyOptional({ enum: LeadStatus })
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsIn(Object.values(LeadStatus))
@@ -228,4 +242,25 @@ export class EditTaskDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsBoolean()
   completed?: boolean;
+}
+
+export class PortfolioTargetDto extends VersionDto {
+  @ApiProperty() @IsUUID() id!: string;
+}
+export class PortfolioBulkDto {
+  @ApiProperty({ type: [PortfolioTargetDto] })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => PortfolioTargetDto)
+  targets!: PortfolioTargetDto[];
+  @ApiProperty()
+  @IsIn(['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED'])
+  portfolioClass!: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED';
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
 }

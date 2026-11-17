@@ -160,21 +160,29 @@ export function Pagination({
     <nav
       aria-label='Paginación'
       aria-busy={busy}
-      className='flex flex-wrap items-center gap-3 py-3'
+      className='flex flex-wrap items-center justify-between gap-2 py-2 text-sm'
     >
-      <Button variant='outline' disabled={busy || page <= 1} onClick={() => onPage(page - 1)}>
-        Anterior
-      </Button>
-      <span>
-        Página {page} · {total} registros
+      <span className='text-muted-foreground tabular-nums' role='status'>
+        Página {page} · {total} {total === 1 ? 'registro' : 'registros'}
       </span>
-      <Button
-        variant='outline'
-        disabled={busy || page * pageSize >= total}
-        onClick={() => onPage(page + 1)}
-      >
-        Siguiente
-      </Button>
+      <div className='flex gap-2'>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={busy || page <= 1}
+          onClick={() => onPage(page - 1)}
+        >
+          Anterior
+        </Button>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={busy || page * pageSize >= total}
+          onClick={() => onPage(page + 1)}
+        >
+          Siguiente
+        </Button>
+      </div>
     </nav>
   );
 }

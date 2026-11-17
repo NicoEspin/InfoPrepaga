@@ -1,6 +1,10 @@
+> Contrato actualizado: [migración histórica y cartera](historical-portfolio.md). Sus reglas de modalidades, retención, confirmación parcial y cálculo versión 2 reemplazan las descripciones anteriores que difieran.
+
 # Reportes comerciales · contrato de cálculo 1
 
 `/reports` permite a ADMIN configurar un análisis, generar una vista previa, guardar una fotografía definitiva y descargar su PDF mediante una acción separada. El servidor vuelve a calcular al guardar. No hay edición ni eliminación de fotografías. `/pipeline` usa leads persistidos para ambos roles; reemplaza la demo en la experiencia productiva.
+
+El listado paginado incluye `from` y `to` como fechas de calendario del reporte guardado. El detalle sigue disponible por separado.
 
 ## Habilitación y migración
 
@@ -23,6 +27,8 @@ La primera asignación se obtiene del historial persistido; una asignación post
 No se hace backfill de etapas o ventas. El estado “Ya contrató” permanece independiente de una venta de InfoPrepaga.
 
 ## Pipeline, venta y permisos
+
+El tablero abre en el mes actual de Buenos Aires y permite elegir un mes anterior. Solo muestra leads en gestión (`ACTIVE`) y sus etapas vigentes. La captación nueva se ubica por su alta en el CRM. La cartera migrada se ubica por la fecha original válida del Excel. Los migrados sin esa fecha se consultan desde Leads.
 
 Etapas: Nuevo, Contactado, En seguimiento, Propuesta enviada y Cerrado. Se permite saltar etapas. Entrar en Cerrado representa una venta ganada, con la fecha del movimiento y la atribución de responsable/origen de ese instante. El actor administrativo que ejecuta el movimiento no reemplaza al responsable comercial.
 
@@ -85,7 +91,7 @@ Todas las operaciones requieren la sesión de NestJS. Los reportes exigen ADMIN 
 | `GET /crm/reports?page=1&pageSize=10` | Historial paginado, sin volver a calcular leads |
 | `GET /crm/reports/:id` | Fotografía guardada |
 | `GET /crm/reports/:id/pdf` | `application/pdf`, attachment de nombre seguro, privado y sin caché |
-| `GET /crm/pipeline` | Filtros `q`, `sourceId`, `assignedToId`, `stage`, `page`, `pageSize` |
+| `GET /crm/pipeline` | Filtros `month` (`YYYY-MM`), `q`, `sourceId`, `assignedToId`, `stage`, `page`, `pageSize`. `month` por defecto es el mes actual de Buenos Aires. Un mes inválido o futuro devuelve `400`. El total y la paginación se calculan sobre el mes filtrado. |
 | `PATCH /crm/pipeline/:id` | `{ version, stage, reason? }`; 409 si cambió, 403 si no puede corregir |
 
 Ejemplo de entrada:

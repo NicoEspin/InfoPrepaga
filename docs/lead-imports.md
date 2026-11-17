@@ -1,3 +1,5 @@
+> Contrato actualizado: [migración histórica y cartera](historical-portfolio.md). Sus reglas de modalidades, retención, confirmación parcial y cálculo versión 2 reemplazan las descripciones anteriores que difieran.
+
 # Importación inteligente de leads desde Excel
 
 La importación comercial usa NestJS, Prisma 6.19.3 y PostgreSQL. La [guía de uso](guia-importacion-excel.md) explica la pantalla. Solo ADMIN puede operar y cada revisión pertenece al administrador que la inició. No hay sincronización permanente con Excel, Meta ni Avalian.

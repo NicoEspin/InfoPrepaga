@@ -4,13 +4,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CrmService } from './crm.service';
 import { leadScope } from './access';
 import { assertAdmin } from '../common/authorization';
+import {
+  buenosAiresDay,
+  buenosAiresMidnight,
+} from '../common/buenos-aires-calendar';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { MovePipelineDto, PipelineQueryDto } from './pipeline.dto';
-
 @Injectable()
 export class PipelineService {
   constructor(
@@ -18,15 +22,40 @@ export class PipelineService {
     private readonly crm: CrmService,
   ) {}
   list(query: PipelineQueryDto, actor: AuthenticatedUser) {
-    const where = {
+    const currentMonth = buenosAiresDay(new Date()).slice(0, 7);
+    const month = query.month ?? currentMonth;
+    if (month > currentMonth)
+      throw new BadRequestException('El mes no puede ser futuro');
+
+    // Prisma represents PostgreSQL date-only fields as UTC calendar dates.
+    const firstDay = new Date(`${month}-01T00:00:00Z`);
+    const nextMonth = new Date(firstDay);
+    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+    const where: Prisma.LeadWhereInput = {
       AND: [
         leadScope(actor),
+        { portfolioClass: 'ACTIVE' },
+        {
+          OR: [
+            {
+              intakeMode: 'NEW',
+              createdAt: {
+                gte: buenosAiresMidnight(firstDay),
+                lt: buenosAiresMidnight(nextMonth),
+              },
+            },
+            {
+              intakeMode: 'HISTORICAL',
+              originDate: { gte: firstDay, lt: nextMonth },
+            },
+          ],
+        },
         {
           ...(query.stage && { commercialStage: query.stage }),
           ...(query.sourceId && { sourceId: query.sourceId }),
           ...(query.assignedToId && { assignedToId: query.assignedToId }),
           ...(query.q?.trim() && {
-            name: { contains: query.q.trim(), mode: 'insensitive' as const },
+            name: { contains: query.q.trim(), mode: 'insensitive' },
           }),
         },
       ],
@@ -62,6 +91,10 @@ export class PipelineService {
         where: { AND: [{ id }, leadScope(actor)] },
       });
       if (!lead) throw new NotFoundException('Lead no encontrado');
+      if (lead.portfolioClass !== 'ACTIVE')
+        throw new BadRequestException(
+          'Activá el contacto antes de gestionar su pipeline',
+        );
       if (lead.version !== dto.version)
         throw new ConflictException(
           'El lead cambió. Actualizá y volvé a intentar.',

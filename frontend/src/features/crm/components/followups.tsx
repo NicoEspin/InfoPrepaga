@@ -2,6 +2,8 @@
 import { useCallback, useState } from 'react';
 import { useDebounce } from '@/hooks/use-debounce';
 import { CrmContent } from '@/components/layout/crm-content';
+import { CrmPageHeader } from '@/components/layout/crm-page-header';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -88,17 +90,17 @@ export function CommercialFollowups({ actor, today }: { actor: Identity; today: 
   }
   return (
     <CrmContent>
-      <div className='followups-content'>
-        <div className='followups-heading'>
-          <div className='leads-heading'>
-            <h1>Seguimientos y tareas</h1>
-            <p>Organizá tus próximos contactos y actividades comerciales.</p>
-          </div>
-          <Button onClick={() => setEditor({})}>Nueva tarea</Button>
-        </div>
-        <p>Agenda persistente · Hora de Buenos Aires · Sin avisos automáticos.</p>
-        <div className='flex flex-wrap items-center gap-3 py-4'>
+      <div className='followups-content @container grid min-w-0 gap-4'>
+        <CrmPageHeader
+          title='Seguimientos y tareas'
+          description='Organizá tus actividades. La agenda usa la hora de Buenos Aires y no envía avisos automáticos.'
+          actions={<Button onClick={() => setEditor({})}>Nueva tarea</Button>}
+        />
+        <fieldset className='bg-card flex min-w-0 flex-wrap items-center gap-3 rounded-lg border p-3 sm:p-4'>
+          <legend className='sr-only'>Filtros de seguimientos</legend>
           <Input
+            type='search'
+            className='sm:w-64'
             aria-label='Buscar tareas'
             placeholder='Prospecto, contacto o tarea'
             value={filters.q}
@@ -146,7 +148,7 @@ export function CommercialFollowups({ actor, today }: { actor: Identity; today: 
             </NativeSelect>
           )}
           <RefreshButton fetching={result.isFetching} onRefresh={() => void result.refetch()} />
-        </div>
+        </fieldset>
         <Feedback
           error={identity.error ?? result.error ?? (admin ? sellers.error : null)}
           onRetry={() => {
@@ -154,7 +156,7 @@ export function CommercialFollowups({ actor, today }: { actor: Identity; today: 
             void result.refetch();
             if (admin) void sellers.refetch();
           }}
-          retrying={result.isFetching}
+          retrying={identity.isFetching || result.isFetching || (admin && sellers.isFetching)}
         />
         <Feedback error={action.error} message={action.message} pending={action.pending} />
         {!result.isError && result.data && (
@@ -164,10 +166,10 @@ export function CommercialFollowups({ actor, today }: { actor: Identity; today: 
           </p>
         )}
         {result.isPending && <LoadingState label='Cargando agenda…' rows={3} />}
-        <div className='followups-workspace'>
+        <div className='grid min-w-0 items-start gap-4 @min-[68rem]:grid-cols-2'>
           <section className='followups-list-panel' aria-label='Listado de tareas'>
             <h2 className='font-semibold'>Tareas del período</h2>
-            <p>
+            <p className='text-muted-foreground text-sm tabular-nums'>
               {range.from} a {shiftDay(range.to, -1)}
             </p>
             {!result.isPending && !result.isError && !tasks.length && (
@@ -185,23 +187,37 @@ export function CommercialFollowups({ actor, today }: { actor: Identity; today: 
                 <li key={task.id} className='border-border rounded-lg border p-3'>
                   <div className='flex flex-wrap items-center justify-between gap-2'>
                     <button
-                      className='lead-name'
+                      className='text-primary focus-visible:outline-ring min-w-0 rounded-sm text-left font-medium break-words underline-offset-2 hover:underline'
                       onClick={() => (task.leadId ? openLead(task.leadId) : setEditor({ task }))}
                     >
                       {task.lead?.name ?? task.contact}
                     </button>
-                    <span>{priorityLabels[task.priority]}</span>
+                    <div className='flex flex-wrap gap-1'>
+                      <Badge variant='outline'>
+                        Prioridad {priorityLabels[task.priority].toLowerCase()}
+                      </Badge>
+                      <Badge variant='secondary'>
+                        {task.completedAt ? 'Completada' : 'Pendiente'}
+                      </Badge>
+                    </div>
                   </div>
-                  <p>{task.title}</p>
-                  <p>
+                  <p className='break-words'>{task.title}</p>
+                  <p className='text-muted-foreground text-sm tabular-nums'>
                     {dateKey(task.dueAt)} · {timeLabel(task.dueAt)} · {task.duration} min
                   </p>
-                  <p>{personName(task.owner)}</p>
+                  <p className='text-muted-foreground text-sm break-all'>
+                    {personName(task.owner)}
+                  </p>
                   <div className='flex flex-wrap gap-2 pt-2'>
                     <Button size='sm' variant='outline' onClick={() => setEditor({ task })}>
                       Editar
                     </Button>
-                    <Button size='sm' disabled={action.pending} onClick={() => toggle(task)}>
+                    <Button
+                      size='sm'
+                      variant={task.completedAt ? 'ghost' : 'default'}
+                      disabled={action.pending}
+                      onClick={() => toggle(task)}
+                    >
                       {action.pending && activeTaskId === task.id
                         ? 'Guardando…'
                         : task.completedAt

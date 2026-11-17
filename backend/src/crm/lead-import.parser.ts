@@ -1,10 +1,15 @@
+import {
+  type ImportConfiguration,
+  portfolioValue,
+  completeImportDate,
+} from './import-portfolio';
 import { BadRequestException } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { contactKeys } from './contact-keys';
 import { isEmail } from 'class-validator';
 import { inflateRawSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { historicalLabel, importKey } from './import-normalization';
-
 export const IMPORT_SHEETS = [
   'DATOS LAN',
   'PIPA',
@@ -14,6 +19,7 @@ export const IMPORT_SHEETS = [
 ];
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 export type ParsedImportRow = {
+  sourceFingerprint?: string;
   sheet: string;
   rowNumber: number;
   group: string;
@@ -26,6 +32,7 @@ export type ParsedImportRow = {
   advisor: string;
   observations: string;
   metadata: {
+    [key: string]: string | boolean | null;
     originalDate: string;
     schedule: string;
     segment: string;
@@ -34,6 +41,60 @@ export type ParsedImportRow = {
     nameColumns: string;
   };
 };
+export function sourceAppearanceFingerprint(
+  row: Pick<
+    ParsedImportRow,
+    | 'sheet'
+    | 'rowNumber'
+    | 'group'
+    | 'nameCandidates'
+    | 'email'
+    | 'phone'
+    | 'advisor'
+    | 'observations'
+  > & {
+    metadata: Record<string, unknown>;
+  },
+  formulas: Array<[number, string]> = [],
+) {
+  // Only source literals belong in the hash; JSON object keys may be reordered in storage.
+  const source = Object.fromEntries(
+    [
+      'originalDate',
+      'intakeMode',
+      'currentManagement',
+      'currentResponsible',
+      'originalLastManaged',
+      'schedule',
+      'segment',
+      'originalAdvisor',
+      'originalPhone',
+      'nameColumns',
+    ]
+      .filter((key) => Object.hasOwn(row.metadata, key))
+      .map((key) => [key, row.metadata[key]]),
+  );
+  return (
+    'v2:' +
+    createHash('sha256')
+      .update(
+        JSON.stringify([
+          row.sheet,
+          row.rowNumber,
+          row.group,
+          row.nameCandidates,
+          row.email,
+          row.phone,
+          row.advisor,
+          row.observations,
+          source,
+          formulas,
+        ]),
+      )
+      .digest('hex')
+  );
+}
+
 const clean = (value: string) => value.replace(/\s+/g, ' ').trim();
 export function importCellText(value: unknown): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -59,7 +120,6 @@ export function importCellText(value: unknown): string {
         : '',
   );
 }
-
 // Bound the XLSX archive before ExcelJS allocates the workbook. No extraction to disk.
 export function checkImportArchive(buffer: Buffer) {
   if (buffer.length > MAX_IMPORT_BYTES)
@@ -129,8 +189,11 @@ export function checkImportArchive(buffer: Buffer) {
       buffer.readUInt16LE(cursor + 32);
   }
 }
-
-export async function parseLeadImport(buffer: Buffer) {
+export async function parseLeadImport(
+  buffer: Buffer,
+  configuration?: ImportConfiguration,
+  mode: 'NEW' | 'HISTORICAL' = 'NEW',
+) {
   checkImportArchive(buffer);
   const book = new ExcelJS.Workbook();
   try {
@@ -161,20 +224,48 @@ export async function parseLeadImport(buffer: Buffer) {
     const lan = canonical === 'DATOS LAN';
     const face = canonical === 'DATOS FACE';
     const leaflet = canonical === 'folletos';
-    const last = lan ? 11 : face ? 5 : leaflet ? 6 : 8;
+    const fields = configuration?.sheets[canonical] ?? {};
+    const headers: Record<string, number> = {};
+    for (let r = 1; r <= Math.min(10, sheet.rowCount); r++)
+      sheet.getRow(r).eachCell((cell, column) => {
+        const key = importKey(importCellText(cell.value)).replaceAll(' ', '_');
+        if (
+          ['gestion_actual', 'responsable_actual', 'ultima_gestion'].includes(
+            key,
+          )
+        )
+          headers[key] = column;
+      });
+    const extraColumns = Object.values(fields).flatMap((rule) =>
+      rule.column ? [rule.column] : [],
+    );
+    if (extraColumns.some((column) => column > sheet.columnCount))
+      throw new BadRequestException(
+        `Configuración incompatible con ${canonical}: columna ausente`,
+      );
+    const last = Math.max(
+      lan ? 11 : face ? 5 : leaflet ? 6 : 8,
+      ...extraColumns,
+      ...Object.values(headers),
+    );
     if (sheet.rowCount > 20000 || sheet.columnCount > 256)
       throw new BadRequestException(
         'La hoja excede los límites de filas o columnas',
       );
+    let outside:
+      { minCol: number; maxCol: number; rows: Set<number> } | undefined;
     sheet.eachRow((row, rowNumber) => {
       const values: string[] = [''];
       const formulaFields: string[] = [];
+      const formulas: Array<[number, string]> = [];
       row.eachCell((cell, column) => {
         if (column > last) {
-          if (cell.value !== null)
-            warnings.add(
-              `${canonical}: hay contenido fuera de la tabla principal; no se importará`,
-            );
+          if (cell.value !== null) {
+            outside ??= { minCol: column, maxCol: column, rows: new Set() };
+            outside.minCol = Math.min(outside.minCol, column);
+            outside.maxCol = Math.max(outside.maxCol, column);
+            outside.rows.add(rowNumber);
+          }
           return;
         }
         const value = cell.value;
@@ -183,17 +274,28 @@ export async function parseLeadImport(buffer: Buffer) {
           typeof value === 'object' &&
           ('formula' in value || 'sharedFormula' in value)
         ) {
-          const field = (lan ? [2, 3, 4, 5] : [2]).includes(column)
-            ? 'name'
-            : column === (lan ? 6 : 3)
-              ? 'phone'
-              : column === (lan ? 8 : face || leaflet ? 0 : 5)
-                ? 'email'
-                : column === (lan ? 11 : face ? 5 : leaflet ? 6 : 8)
-                  ? 'observations'
-                  : undefined;
-          if (field) formulaFields.push(field);
-          else
+          const defaults: Record<string, number[]> = {
+            name: lan ? [2, 3, 4, 5] : [2],
+            phone: [lan ? 6 : 3],
+            email: [lan ? 8 : face || leaflet ? 0 : 5],
+            observations: [lan ? 11 : face ? 5 : leaflet ? 6 : 8],
+            currentManagement: [headers.gestion_actual ?? 0],
+            currentResponsible: [headers.responsable_actual ?? 0],
+            lastManaged: [headers.ultima_gestion ?? 0],
+          };
+          const field = Object.keys(defaults).find((key) => {
+            const rule = fields[key as keyof typeof fields];
+            return rule
+              ? rule.column === column
+              : defaults[key].includes(column);
+          });
+          if (field) {
+            formulaFields.push(field);
+            formulas.push([
+              column,
+              String('formula' in value ? value.formula : value.sharedFormula),
+            ]);
+          } else
             warnings.add(
               `${canonical}, fila ${rowNumber}: se omitió una fórmula en un dato complementario`,
             );
@@ -203,14 +305,22 @@ export async function parseLeadImport(buffer: Buffer) {
         values[column] = importCellText(value);
       });
       const v = (column: number) => values[column] ?? '';
+      const field = (key: keyof typeof fields, fallback: number) => {
+        const rule = fields[key];
+        return rule
+          ? (rule.value ?? (rule.column ? v(rule.column) : ''))
+          : v(fallback);
+      };
       const nameColumns = lan ? [2, 3, 4, 5] : [2];
       const phoneColumn = lan ? 6 : 3;
       const emailColumn = lan ? 8 : face || leaflet ? 0 : 5;
-      const names = nameColumns.map(v).filter(Boolean);
+      const names = fields.name
+        ? [field('name', 2)].filter(Boolean)
+        : nameColumns.map(v).filter(Boolean);
       const uniqueNames = [
         ...new Map(names.map((name) => [importKey(name), name])).values(),
       ];
-      const phone = v(phoneColumn);
+      const phone = field('phone', phoneColumn);
       // Recognize structural rows, including PIPA's decorative month above its header.
       if (
         /^(tel|telefono|teléfono)$/i.test(phone) ||
@@ -241,7 +351,7 @@ export async function parseLeadImport(buffer: Buffer) {
         });
         return;
       }
-      const email = emailColumn ? v(emailColumn).toLowerCase() : '';
+      const email = field('email', emailColumn).toLowerCase();
       if (!names.length && !phone && !email && !formulaFields.length) {
         discarded.push({
           sheet: canonical,
@@ -254,18 +364,24 @@ export async function parseLeadImport(buffer: Buffer) {
         throw new BadRequestException(
           'El archivo supera 5.000 filas candidatas',
         );
-      const originalAdvisor = v(lan ? 10 : face ? 1 : leaflet ? 5 : 7);
+      const originalAdvisor = field(
+        'advisor',
+        lan ? 10 : face ? 1 : leaflet ? 5 : 7,
+      );
       const label =
         canonical === 'PIPA' ? historicalLabel(originalAdvisor) : undefined;
       const advisor = label ? '' : originalAdvisor;
-      const group = lan
-        ? names.length === 1
-          ? ['Datos Lan', 'Whatsapp', 'Datos Ip', 'Meta'][
-              nameColumns.find((column) => v(column))! - 2
-            ]
-          : 'Canal por resolver'
-        : (label ?? canonical);
-      rows.push({
+      const group =
+        lan && fields.name
+          ? 'Canal por resolver'
+          : lan
+            ? names.length === 1
+              ? ['Datos Lan', 'Whatsapp', 'Datos Ip', 'Meta'][
+                  nameColumns.find((column) => v(column))! - 2
+                ]
+              : 'Canal por resolver'
+            : (label ?? canonical);
+      const parsed: ParsedImportRow = {
         sheet: canonical,
         rowNumber,
         group,
@@ -276,9 +392,45 @@ export async function parseLeadImport(buffer: Buffer) {
         phone,
         email,
         advisor,
-        observations: v(lan ? 11 : face ? 5 : leaflet ? 6 : 8),
+        observations: field(
+          'observations',
+          lan ? 11 : face ? 5 : leaflet ? 6 : 8,
+        ),
         metadata: {
-          originalDate: v(face ? 4 : 1),
+          originalDate: field('originalDate', face ? 4 : 1),
+          ...(mode === 'HISTORICAL' && {
+            intakeMode: mode,
+            currentManagement: field(
+              'currentManagement',
+              headers.gestion_actual ?? 0,
+            ),
+            portfolioClass:
+              portfolioValue(
+                field('currentManagement', headers.gestion_actual ?? 0),
+              ) ??
+              configuration?.managementAliases?.[
+                importKey(
+                  field('currentManagement', headers.gestion_actual ?? 0),
+                )
+              ] ??
+              null,
+            currentResponsible: field(
+              'currentResponsible',
+              headers.responsable_actual ?? 0,
+            ),
+            originalLastManaged: field(
+              'lastManaged',
+              headers.ultima_gestion ?? 0,
+            ),
+            lastManaged: completeImportDate(
+              field('lastManaged', headers.ultima_gestion ?? 0),
+              configuration?.dateFormat,
+            ),
+            originDate: completeImportDate(
+              field('originalDate', face ? 4 : 1),
+              configuration?.dateFormat,
+            ),
+          }),
           schedule: face || leaflet ? '' : v(lan ? 7 : 4),
           segment: face ? '' : v(lan ? 9 : leaflet ? 4 : 6),
           originalAdvisor,
@@ -288,16 +440,32 @@ export async function parseLeadImport(buffer: Buffer) {
             .map((column) => String.fromCharCode(64 + column))
             .join(','),
         },
-      });
+      };
+      // Capture workbook input once; review choices must never change replay identity.
+      parsed.sourceFingerprint = sourceAppearanceFingerprint(parsed, formulas);
+      rows.push(parsed);
     });
+    if (outside) {
+      const bounds = [...outside.rows];
+      const range = `${sheet.getCell(bounds[0], outside.minCol).address}:${sheet.getCell(bounds[bounds.length - 1], outside.maxCol).address}`;
+      warnings.add(
+        `${canonical}, ${range} (${bounds.length} filas con contenido): columnas fuera de la tabla principal; no se importan.`,
+      );
+    }
   }
+  if (
+    configuration &&
+    Object.keys(configuration.sheets).some((name) => !sheets.includes(name))
+  )
+    throw new BadRequestException(
+      'La configuración contiene hojas ausentes o incompatibles',
+    );
   if (!rows.length)
     throw new BadRequestException(
       'No encontramos contactos en las hojas admitidas',
     );
   return { rows, sheets, warnings: [...warnings], discarded };
 }
-
 export function importContactErrors(row: {
   name: string;
   nameResolved: boolean;

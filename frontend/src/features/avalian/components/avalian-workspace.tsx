@@ -20,6 +20,8 @@ import {
   IconUpload
 } from '@tabler/icons-react';
 import { CrmContent } from '@/components/layout/crm-content';
+import { CrmPageHeader } from '@/components/layout/crm-page-header';
+import { CrmTable } from '@/features/crm/components/crm-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,14 +29,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Separator } from '@/components/ui/separator';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from '@/components/ui/table';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -111,10 +106,10 @@ export function AvalianWorkspace({ initialRecords }: { initialRecords: AvalianRe
       <div className='avalian-content'>
         <div className='avalian-layout'>
           <div className='avalian-main-column'>
-            <div className='leads-heading'>
-              <h1>Cartera Avalian</h1>
-              <p>Administración y consulta de registros importados.</p>
-            </div>
+            <CrmPageHeader
+              title='Cartera Avalian'
+              description='Administración y consulta de registros importados.'
+            />
             <p className='leads-demo-note'>
               <span />
               Vista previa · Datos sintéticos · Módulo independiente de los leads.
@@ -259,13 +254,14 @@ export function AvalianWorkspace({ initialRecords }: { initialRecords: AvalianRe
                   </Button>
                 </div>
               ) : null}
-              <Table>
+              <CrmTable label='Tabla de registros de Avalian'>
                 <caption className='sr-only'>Registros sintéticos importados de Avalian</caption>
-                <TableHeader>
+                <TableHeader className='bg-muted'>
                   <TableRow>
                     {columns.map(([key, label]) => (
                       <TableHead
                         key={key}
+                        scope='col'
                         aria-sort={
                           sort?.key === key
                             ? sort.descending
@@ -289,7 +285,7 @@ export function AvalianWorkspace({ initialRecords }: { initialRecords: AvalianRe
                         </button>
                       </TableHead>
                     ))}
-                    <TableHead>
+                    <TableHead scope='col'>
                       <span className='sr-only'>Acciones</span>
                     </TableHead>
                   </TableRow>
@@ -327,7 +323,7 @@ export function AvalianWorkspace({ initialRecords }: { initialRecords: AvalianRe
                             render={
                               <Button
                                 variant='ghost'
-                                size='icon-xs'
+                                size='icon'
                                 aria-label={`Acciones del registro ${record.internalId}`}
                               />
                             }
@@ -375,7 +371,7 @@ export function AvalianWorkspace({ initialRecords }: { initialRecords: AvalianRe
                     </TableRow>
                   ) : null}
                 </TableBody>
-              </Table>
+              </CrmTable>
               <footer className='avalian-pagination'>
                 <p role='status' aria-live='polite'>
                   Mostrando {ordered.length ? (currentPage - 1) * pageSize + 1 : 0} a{' '}
@@ -467,7 +463,7 @@ export function AvalianWorkspace({ initialRecords }: { initialRecords: AvalianRe
                 onClick={() => setPreview(createSimulatedBatch(records, new Date().toISOString()))}
               >
                 <IconUpload data-icon='inline-start' />
-                Importar registros autorizados
+                Abrir vista previa de importación
               </Button>
               <p className='avalian-import-caption'>
                 Abrí la vista previa de un lote ficticio para probar el flujo.

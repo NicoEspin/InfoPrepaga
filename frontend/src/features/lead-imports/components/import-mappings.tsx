@@ -43,6 +43,7 @@ const destination = (rule: ImportMapping) =>
   rule.kind === 'ORIGIN' ? (rule.source?.name ?? 'Origen no disponible') : name(rule.assignedTo);
 const kindLabel = {
   ADVISOR: 'Alias de vendedor',
+  CURRENT_RESPONSIBLE: 'Responsable actual',
   ORIGIN: 'Origen',
   DEFAULT: 'Responsable de hoja'
 };
@@ -98,6 +99,7 @@ export function ImportMappings({ actorId }: { actorId: string }) {
             options={[
               { id: '', name: 'Todos' },
               { id: 'ADVISOR', name: 'Alias de vendedores' },
+              { id: 'CURRENT_RESPONSIBLE', name: 'Responsables actuales' },
               { id: 'ORIGIN', name: 'Orígenes' },
               { id: 'DEFAULT', name: 'Responsables predeterminados' }
             ]}

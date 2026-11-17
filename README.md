@@ -77,6 +77,8 @@ Para una base local con Docker puede usarse `pnpm db:up` dentro de `backend/`, t
 
 No existen credenciales predeterminadas ni registro público. Sobre una base nueva, ejecutar el seed explícitamente con `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD` definidos en el entorno local. La contraseña debe tener al menos 12 caracteres y como máximo 72 bytes UTF-8. El seed crea `ADMIN`, `VENDEDOR` y permisos administrativos; no restablece contraseñas ni modifica usuarios existentes. Después, retirar las variables de bootstrap del entorno.
 
+Para probar el CRM con cuentas y contactos sintéticos, usá la [seed demo y su recorrido de pruebas](docs/seed-demo.md).
+
 Si el correo ya existe, el bootstrap falla sin cambiar la cuenta. Si hay roles antiguos `USER`/`MANAGER`, falla para exigir una migración de datos revisada. No elimina roles ni datos existentes automáticamente.
 
 El administrador puede crear vendedores desde `/settings` o `POST /auth/register` autenticado en NestJS. La pantalla de usuarios del starter sigue siendo una **demo sintética**; la administración real inicial se encuentra en `/settings`.

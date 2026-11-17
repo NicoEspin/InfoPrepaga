@@ -27,6 +27,7 @@ model User {
   createdTasks  CommercialTask[]  @relation("TaskCreator")
   activities    LeadActivity[]
   leadImports   LeadImportBatch[]
+  importConfigurations LeadImportConfiguration[]
   importAliasTargets LeadImportMapping[] @relation("ImportAliasTarget")
   confirmedImportMappings LeadImportMapping[] @relation("ImportMappingAuthor")
   importMappingEvents LeadImportMappingEvent[]
@@ -131,7 +132,24 @@ model LeadSource {
   @@map("lead_sources")
 }
 
+enum PortfolioClass {
+  ACTIVE
+  HISTORICAL
+  UNCLASSIFIED
+}
+
+enum LeadIntakeMode {
+  NEW
+  HISTORICAL
+}
+
 model Lead {
+  portfolioClass PortfolioClass @default(ACTIVE)
+  intakeMode LeadIntakeMode @default(NEW)
+  autoAssignmentEligible Boolean @default(true)
+  originDate DateTime? @db.Date
+  declaredLastManagedAt DateTime? @db.Date
+
   id                 String           @id @default(uuid())
   name               String
   email              String?
@@ -162,6 +180,8 @@ model Lead {
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
+  @@index([portfolioClass, assignedToId, createdAt, id])
+  @@index([autoAssignmentEligible, portfolioClass, assignedToId])
   @@index([createdAt, entrySourceId], map: "reports_lead_creation")
   @@index([assignedToId, createdAt, id])
   @@index([status])
@@ -172,6 +192,9 @@ model Lead {
 }
 
 model LeadImportBatch {
+  mode LeadIntakeMode @default(NEW)
+  configuration Json?
+
   id          String          @id @default(uuid())
   ownerId     String
   owner       User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
@@ -186,6 +209,7 @@ model LeadImportBatch {
   total       Int
   imported    Int             @default(0)
   omitted     Int             @default(0)
+  alreadyRegistered Int?
   created     Int             @default(0)
   updated     Int             @default(0)
   merged      Int             @default(0)
@@ -221,6 +245,8 @@ model LeadImportRow {
   reviewedMatches    String[]
   leadId             String?
   outcome            String?
+  sourceFingerprint  String?
+  legacyFingerprints String[]        @default([])
   lead               Lead?           @relation(fields: [leadId], references: [id], onDelete: Restrict)
 
   @@unique([batchId, sheet, rowNumber])
@@ -412,4 +438,15 @@ model CommercialReport {
   @@unique([authorId, operationKey])
   @@index([generatedAt, id])
   @@map("commercial_reports")
+}
+
+model LeadImportConfiguration {
+  id String @id @default(uuid())
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  fingerprint String
+  configuration Json
+  createdAt DateTime @default(now())
+  @@unique([ownerId, fingerprint])
+  @@map("lead_import_configurations")
 }

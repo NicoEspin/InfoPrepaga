@@ -1,9 +1,18 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { assertDemoTarget, seedDemo, writeDemoWorkbook } from './seed-demo';
 const prisma = new PrismaClient();
 async function main() {
   const email = process.env.SEED_ADMIN_EMAIL;
   const password = process.env.SEED_ADMIN_PASSWORD;
+  const demo = process.argv.includes('--demo');
+  if (demo) {
+    assertDemoTarget();
+    if (email || password)
+      throw new Error(
+        'Remove bootstrap variables before running the demo seed',
+      );
+  }
   if (Boolean(email) !== Boolean(password))
     throw new Error('Provide both bootstrap variables');
   if (
@@ -24,7 +33,7 @@ async function main() {
       update: {},
       create: { name: 'ADMIN' },
     });
-    await tx.role.upsert({
+    const seller = await tx.role.upsert({
       where: { name: 'VENDEDOR' },
       update: {},
       create: { name: 'VENDEDOR' },
@@ -48,6 +57,7 @@ async function main() {
         });
       }
     }
+    if (demo) await seedDemo(tx, admin.id, seller.id);
     if (email && hash) {
       const existing = await tx.user.findUnique({ where: { email } });
       if (existing)
@@ -61,12 +71,16 @@ async function main() {
       });
     }
   });
+  if (demo) console.log(`Demo workbook: ${await writeDemoWorkbook()}`);
   console.log('Seed completed without resetting existing accounts');
 }
 main()
-  .catch(() => {
+  .catch((error: unknown) => {
+    // Prisma errors can contain connection or record details.
     console.error(
-      'Seed failed. Check role compatibility and bootstrap configuration.',
+      error instanceof Error && error.constructor === Error
+        ? error.message
+        : 'Seed failed. Check database connectivity and applied migrations.',
     );
     process.exitCode = 1;
   })

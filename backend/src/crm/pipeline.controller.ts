@@ -83,8 +83,9 @@ export class PipelineController {
   })
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
-    summary: 'Pipeline paginado; VENDEDOR ve únicamente sus leads asignados',
+    summary: 'Pipeline por mes; VENDEDOR ve únicamente sus leads asignados',
   })
+  @ApiResponse({ status: 400, description: 'Mes inválido o futuro' })
   list(
     @Query() query: PipelineQueryDto,
     @CurrentUser() actor: AuthenticatedUser,

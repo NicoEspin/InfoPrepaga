@@ -19,18 +19,22 @@ const ExcelJS = createRequire(path.resolve(__dirname,'../backend/package.json'))
       ['5/8','CONTACTO UI',null,null,'UI-IMPORT@example.test',null,null,'Historia B'],
       ['5/8','Corregir UI',null,null,'not-an-email'],
     ]);
-    async function upload(workbook,name='synthetic-ui.xlsx') {
+    async function upload(workbook,name='synthetic-ui.xlsx',mode='NEW') {
       await page.goto(`${url}/leads`);
       await page.getByRole('button',{name:'Importar Excel',exact:true}).click();
       const dialog=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Importar leads desde Excel'})});
+      await dialog.getByRole('combobox',{name:'Modalidad de importación'}).selectOption(mode);
       await dialog.locator('input[type=file]').setInputFiles({name,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await workbook.xlsx.writeBuffer())});
-      await dialog.getByRole('button',{name:'Subir y revisar',exact:true}).click();
+      await dialog.getByRole('button',{name:'Analizar archivo',exact:true}).click();
       await dialog.getByText(name,{exact:true}).waitFor();
+      await dialog.getByRole('button',{name:'Continuar a revisión',exact:true}).click();
+      assert.equal(await dialog.getByRole('heading',{name:'Revisar registros'}).evaluate((heading)=>heading===document.activeElement),true);
       return dialog;
     }
     async function confirm(dialog,summary,exclude=false) {
+      await dialog.getByRole('button',{name:'Ver resumen',exact:true}).click();
       if(exclude)await dialog.getByRole('checkbox',{name:/Excluir explícitamente/}).check();
-      await dialog.getByRole('button',{name:/^Confirmar carga/}).click();
+      await dialog.getByRole('button',{name:/^Importar registros/}).click();
       const confirmation=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Confirmar modificaciones',exact:true})});
       assert.match(await confirmation.innerText(),summary);
       await confirmation.getByRole('button',{name:'Confirmar y procesar',exact:true}).click();
@@ -41,11 +45,12 @@ const ExcelJS = createRequire(path.resolve(__dirname,'../backend/package.json'))
     assert.equal(await dialog.getByRole('row').count(),2);
     assert.match(await dialog.innerText(),/Requiere corrección/);
     await confirm(dialog,/1 nuevos leads; 0 contactos existentes actualizados; 1 apariciones consolidadas/,true);
-    assert.match(await dialog.innerText(),/Nuevos: 1\. Actualizados: 0\. Consolidados: 1\./);
+    await dialog.getByRole('region',{name:'Resultado acumulado del lote'}).waitFor();
+    assert.match(await dialog.getByRole('region',{name:'Resultado acumulado del lote'}).innerText(),/altas\s+1[\s\S]*consolidaciones\s+1/i);
     await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
     // SKIP: exact reimport preserves both original appearances, no extra events.
     dialog=await upload(initial);
-    await dialog.getByText('2 omitidos',{exact:true}).waitFor();
+    await dialog.getByText('2 ya registradas',{exact:true}).waitFor();
     await confirm(dialog,/0 nuevos leads; 0 contactos existentes actualizados; 0 apariciones consolidadas/,true);
     await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
     const lookup=await context.request.get(`${url}/api/crm/leads?q=ui-import%40example.test`);
@@ -57,7 +62,7 @@ const ExcelJS = createRequire(path.resolve(__dirname,'../backend/package.json'))
     await dialog.getByRole('combobox',{name:'Filtrar revisión'}).click();
     await page.getByRole('option',{name:'Listos para actualizar',exact:true}).click();
     await dialog.getByRole('button',{name:'Revisar fila',exact:true}).click();
-    const details=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Revisar fila 2',exact:true})});
+    const details=page.getByRole('region',{name:'Revisar fila 2',exact:true});
     await details.getByRole('columnheader',{name:'Valor actual CRM',exact:true}).waitFor();
     assert.match(await details.innerText(),/Completar vacío/);assert.match(await details.innerText(),/Prospecto/);
     await details.getByRole('button',{name:'Cancelar',exact:true}).click();
@@ -77,7 +82,7 @@ const ExcelJS = createRequire(path.resolve(__dirname,'../backend/package.json'))
     // Safe optional correction is explicit and retains the discarded value.
     dialog=await upload(book([['7/8','Corrección opcional','not-a-phone',null,'optional-ui@example.test',null,null,'Historia opcional']]),'synthetic-optional-correction.xlsx');
     await dialog.getByText('1 errores de contacto',{exact:true}).waitFor();
-    await dialog.getByText('Correcciones masivas conservadoras',{exact:true}).click();
+    await dialog.getByText('Correcciones masivas',{exact:true}).click();
     await dialog.getByRole('button',{name:'Descartar teléfono inválido (1)',exact:true}).click();
     await page.getByRole('button',{name:'Aplicar corrección a la revisión',exact:true}).click();
     await dialog.getByText('0 errores de contacto',{exact:true}).waitFor();
@@ -110,6 +115,45 @@ const ExcelJS = createRequire(path.resolve(__dirname,'../backend/package.json'))
     await page.getByRole('button',{name:'Guardar equivalencia',exact:true}).click();
     await settings.getByRole('cell',{name:newSource.name,exact:true}).waitFor();
     assert.equal((await(await context.request.get(`${url}/api/crm/leads/${lead.id}`)).json()).sourceId,lead.sourceId);
+
+    // Historical migration: keyboard navigation, partial import and durable recovery.
+    const historicalBook=book([
+      ['2026-05-01','Historico UI',null,null,'history-ui@example.test',null,'Asesor anterior',null,'NO',null,'4/5'],
+      ['2026-05-02','Activo UI',null,null,'active-history-ui@example.test',null,'Asesor anterior',null,'SI'],
+      ['2026-05-03','Error historico UI',null,null,'invalid-history',null,null,null,'NO']
+    ]);
+    historicalBook.getWorksheet('Fede').getRow(1).getCell(9).value='Gestion_actual';
+    historicalBook.getWorksheet('Fede').getRow(1).getCell(10).value='Responsable_actual';
+    historicalBook.getWorksheet('Fede').getRow(1).getCell(11).value='Ultima_gestion';
+    dialog=await upload(historicalBook,'historical-ui.xlsx','HISTORICAL');
+    await dialog.getByRole('button',{name:'Atrás',exact:true}).focus();
+    await page.keyboard.press('Enter');
+    await dialog.getByText('Responsables actuales · independientes del asesor histórico',{exact:true}).waitFor({state:'attached'});
+    if(process.env.CRM_UI_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.CRM_UI_SCREENSHOT_DIR,'historical-configuration.png')});
+    await dialog.getByRole('button',{name:'Continuar a revisión',exact:true}).click();
+    assert.match(await dialog.innerText(),/Responsable actual sin resolver/);
+    if(process.env.CRM_UI_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.CRM_UI_SCREENSHOT_DIR,'historical-exceptions.png')});
+    await dialog.getByRole('button',{name:'Ver resumen',exact:true}).click();
+    await dialog.getByRole('button',{name:/^Importar registros/}).click();
+    await page.getByRole('button',{name:'Confirmar y procesar',exact:true}).click();
+    await dialog.getByText('Se procesaron los registros válidos. Las excepciones siguen disponibles en este lote.',{exact:true}).waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'Importar Excel',exact:true}).click();
+    await page.getByText('Importaciones recientes',{exact:true}).click();
+    await page.getByRole('button',{name:/historical-ui.xlsx.*1 altas.*2 pendientes/}).click();
+    const resumed=page.getByRole('dialog');
+    await resumed.getByRole('button',{name:'Retomar revisión',exact:true}).click();
+    await resumed.getByRole('heading',{name:'Revisar registros',exact:true}).waitFor();
+    await resumed.getByText('2 requieren revisión',{exact:true}).waitFor();
+    const selectAll=resumed.getByRole('checkbox',{name:/Seleccionar todos los resultados filtrados/});
+    await selectAll.check();
+    await resumed.getByText(/Alcance: 2 apariciones/).waitFor();
+    await selectAll.uncheck();
+    assert.equal((await(await context.request.get(`${url}/api/crm/leads?q=history-ui%40example.test&portfolioClass=HISTORICAL`)).json()).total,1);
+    const daily=await(await context.request.get(`${url}/api/crm/leads?q=history-ui%40example.test`)).json();assert.equal(daily.total,0);
+    await page.setViewportSize({width:390,height:844});
+    await resumed.getByText('Paso 3 de 4 · Revisar registros',{exact:true}).waitFor();
+    if(process.env.CRM_UI_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.CRM_UI_SCREENSHOT_DIR,'historical-mobile.png')});
     console.log('PASS: browser CREATE/UPDATE/MERGE/SKIP/REVIEW, field comparison, durable provenance, explicit optional correction and mapping administration');
   } finally {await browser.close();}
 })().catch((error)=>{console.error(error);process.exitCode=1;});

@@ -1,3 +1,5 @@
+import { validateOrReject } from 'class-validator';
+import { readConfiguration } from './import-portfolio';
 import {
   Body,
   Controller,
@@ -28,13 +30,13 @@ import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import {
   ImportPatchDto,
+  ImportSelectionDto,
   ImportRowPatchDto,
   ImportVersionDto,
 } from './lead-import.dto';
 import { LeadImportService } from './lead-import.service';
 import { MAX_IMPORT_BYTES } from './lead-import.parser';
 import { ImportResponse } from './lead-import.responses';
-
 @ApiTags('lead-imports')
 @ApiBearerAuth()
 @Roles('ADMIN')
@@ -74,14 +76,65 @@ export class LeadImportController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: MAX_IMPORT_BYTES, files: 1, fields: 0, parts: 1 },
+      limits: {
+        fileSize: MAX_IMPORT_BYTES,
+        files: 1,
+        fields: 2,
+        parts: 3,
+        fieldSize: 20000,
+      },
     }),
   )
   upload(
+    @Body('mode') mode: string = 'NEW',
+    @Body('configuration') configuration: string | undefined,
     @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.imports.upload(file, actor);
+    if (mode !== 'NEW' && mode !== 'HISTORICAL')
+      throw new BadRequestException('Modalidad inválida');
+    return this.imports.upload(
+      file,
+      actor,
+      mode,
+      readConfiguration(configuration),
+    );
+  }
+  @Get('configurations')
+  @Header('Cache-Control', 'private, no-store')
+  configurations(@CurrentUser() actor: AuthenticatedUser) {
+    return this.imports.configurations(actor);
+  }
+  @Post(':id/reconfigure')
+  @Header('Cache-Control', 'private, no-store')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: MAX_IMPORT_BYTES,
+        files: 1,
+        fields: 3,
+        parts: 4,
+        fieldSize: 20000,
+      },
+    }),
+  )
+  reconfigure(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('version', ParseIntPipe) version: number,
+    @Body('mode') mode: string,
+    @Body('configuration') configuration: string | undefined,
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (mode !== 'NEW' && mode !== 'HISTORICAL')
+      throw new BadRequestException('Modalidad inválida');
+    return this.imports.upload(
+      file,
+      actor,
+      mode,
+      readConfiguration(configuration),
+      { id, version },
+    );
   }
   @Get(':id')
   @ImportResponse('preview')
@@ -95,6 +148,9 @@ export class LeadImportController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @CurrentUser() actor: AuthenticatedUser,
     @Query('filter', new DefaultValuePipe('ALL')) filter: string,
+    @Query('sheet') sheet?: string,
+    @Query('portfolioClass') portfolioClass?: string,
+    @Query('problem') problem?: string,
   ) {
     if (page < 1 || page > 100)
       throw new BadRequestException('Página inválida');
@@ -110,7 +166,18 @@ export class LeadImportController {
       ].includes(filter)
     )
       throw new BadRequestException('Filtro inválido');
-    return this.imports.get(id, actor, page, filter);
+    const selection = Object.assign(new ImportSelectionDto(), {
+      sheet,
+      portfolioClass,
+      problem,
+    });
+    return validateOrReject(selection, { forbidUnknownValues: true })
+      .then(() => this.imports.get(id, actor, page, filter, selection))
+      .catch((error: unknown) => {
+        if (Array.isArray(error))
+          throw new BadRequestException('Filtres de revisión inválidos');
+        throw error;
+      });
   }
   @Patch(':id')
   @ImportResponse('changed')

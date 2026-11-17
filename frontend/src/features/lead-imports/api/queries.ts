@@ -27,11 +27,12 @@ export const importPreviewOptions = (
   actorId: string,
   id: string,
   page: number,
-  filter: ImportFilter = 'ALL'
+  filter: ImportFilter = 'ALL',
+  selection: import('./types').ImportSelection = {}
 ) =>
   queryOptions({
-    queryKey: ['crm', actorId, 'lead-imports', id, page, filter],
-    queryFn: ({ signal }) => getImport(id, page, signal, filter),
+    queryKey: ['crm', actorId, 'lead-imports', id, page, filter, selection],
+    queryFn: ({ signal }) => getImport(id, page, signal, filter, selection),
     enabled: !!id,
     retry: false,
     staleTime: 0

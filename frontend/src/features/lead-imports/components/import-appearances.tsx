@@ -57,6 +57,15 @@ export function ImportAppearances({ actorId, leadId }: { actorId: string; leadId
                     ['Lote', item.batchId],
                     ['Hoja / fila', `${item.sheet} / ${item.rowNumber}`],
                     ['Asesor original', item.originalAdvisor || 'Sin dato'],
+                    [
+                      'Responsable declarado en la migración',
+                      item.currentResponsible || 'Sin dato'
+                    ],
+                    ['Gestión declarada', item.currentManagement || 'Sin dato'],
+                    [
+                      'Última gestión declarada (Excel, no actividad CRM)',
+                      item.declaredLastManagedAt || item.originalLastManaged || 'Sin fecha'
+                    ],
                     ['Fecha original', item.originalDate || 'Sin dato'],
                     ['Procedencia histórica', item.group],
                     [
@@ -74,12 +83,18 @@ export function ImportAppearances({ actorId, leadId }: { actorId: string; leadId
                 </dl>
                 {item.corrections && (
                   <details>
-                    <summary>Corrección autorizada de contacto opcional</summary>
+                    <summary>Corrección de contacto</summary>
                     {item.corrections.email !== null && (
-                      <p>Correo original descartado: {item.corrections.email}</p>
+                      <p>
+                        Correo original: {item.corrections.email || 'Vacío'} · Correo aplicado:{' '}
+                        {item.corrections.appliedEmail || 'Vacío'}
+                      </p>
                     )}
-                    {item.corrections.phone && (
-                      <p>Teléfono original descartado: {item.corrections.phone}</p>
+                    {item.corrections.phone !== null && !item.corrections.formulaPhoneOmitted && (
+                      <p>
+                        Teléfono original: {item.corrections.phone || 'Vacío'} · Teléfono aplicado:{' '}
+                        {item.corrections.appliedPhone || 'Vacío'}
+                      </p>
                     )}
                     {item.corrections.formulaPhoneOmitted && (
                       <p>Fórmula de teléfono omitida; no se utilizó su resultado guardado.</p>

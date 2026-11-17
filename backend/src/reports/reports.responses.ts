@@ -61,7 +61,16 @@ const schemas = {
   report,
   catalogs: obj({ sources: arr(source), responsibles: arr(person) }),
   list: obj({
-    items: arr(obj({ id: uuid, name: str, authorId: uuid, generatedAt: date })),
+    items: arr(
+      obj({
+        id: uuid,
+        name: str,
+        authorId: uuid,
+        generatedAt: date,
+        from: nullable(str),
+        to: nullable(str),
+      }),
+    ),
     total: int,
     page: int,
     pageSize: int,

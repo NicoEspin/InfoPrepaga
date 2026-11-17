@@ -22,6 +22,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
+    "prisma:seed:demo": "prisma db seed -- --demo",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "lint:fix": "eslint \"{src,test,prisma}/**/*.ts\" --fix",

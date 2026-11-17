@@ -2,9 +2,10 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CrmContent } from '@/components/layout/crm-content';
+import { CrmPageHeader } from '@/components/layout/crm-page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Field, FieldLabel } from '@/components/ui/field';
+import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import {
@@ -30,7 +31,19 @@ import { moveStage } from '../api/service';
 import { stages, type PipelineLead, type Stage } from '../api/types';
 import './pipeline.css';
 
-export function CommercialPipeline({ actor }: { actor: Identity }) {
+const monthFormat = new Intl.DateTimeFormat('es-AR', {
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC'
+});
+
+export function CommercialPipeline({
+  actor,
+  currentMonth
+}: {
+  actor: Identity;
+  currentMonth: string;
+}) {
   const admin = actor.roles.includes('ADMIN');
   const client = useQueryClient();
   const { openLead } = useLeadProfile();
@@ -39,12 +52,17 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
   const [source, setSource] = useState('');
   const [owner, setOwner] = useState('');
   const [stage, setStage] = useState('');
+  const [month, setMonth] = useState(currentMonth);
+  const [monthDraft, setMonthDraft] = useState(currentMonth);
+  const [monthInvalid, setMonthInvalid] = useState(false);
+  const monthInput = useRef<HTMLInputElement>(null);
   const [page, setPage] = useState(1);
   const query = new URLSearchParams({
     q,
     sourceId: source,
     assignedToId: owner,
     stage,
+    month,
     page: String(page),
     pageSize: '50'
   });
@@ -60,6 +78,15 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
   const lock = useRef(false);
   const [correction, setCorrection] = useState<{ lead: PipelineLead; stage: Stage } | null>(null);
   const [reason, setReason] = useState('');
+
+  function changeMonth(value: string) {
+    setMonthDraft(value);
+    setMonthInvalid(false);
+    if (!/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/.test(value) || value > currentMonth) return;
+    setMonth(value);
+    setPage(1);
+  }
+
   async function move(lead: PipelineLead, target: Stage, correctionReason?: string) {
     if (lead.commercialStage === target || lock.current) return;
     if (lead.commercialStage === 'CLOSED' && !correctionReason) {
@@ -92,13 +119,48 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
   return (
     <CrmContent>
       <div className='pipeline-content flex flex-col gap-4'>
-        <div className='pipeline-heading'>
-          <div className='leads-heading'>
-            <h1>Pipeline comercial</h1>
-            <p>Un recorrido por lead. Entrar en Cerrado registra una venta ganada.</p>
-          </div>
-        </div>
-        <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+        <CrmPageHeader
+          title='Pipeline comercial'
+          description='Un recorrido por lead. Entrar en Cerrado registra una venta ganada.'
+        />
+        <fieldset className='bg-card grid min-w-0 gap-3 rounded-lg border p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-3 xl:grid-cols-5'>
+          <legend className='sr-only'>Filtros del pipeline</legend>
+          <Field>
+            <div className='flex items-center justify-between gap-2'>
+              <FieldLabel htmlFor='pipeline-month'>Mes</FieldLabel>
+              {monthDraft !== currentMonth && (
+                <Button
+                  type='button'
+                  variant='link'
+                  className='h-auto p-0 leading-snug'
+                  onClick={() => {
+                    changeMonth(currentMonth);
+                    monthInput.current?.focus();
+                  }}
+                >
+                  Mes actual
+                </Button>
+              )}
+            </div>
+            <Input
+              ref={monthInput}
+              id='pipeline-month'
+              type='month'
+              min='0001-01'
+              max={currentMonth}
+              placeholder='AAAA-MM'
+              value={monthDraft}
+              aria-invalid={monthInvalid || undefined}
+              aria-describedby={monthInvalid ? 'pipeline-month-error' : undefined}
+              onChange={(e) => changeMonth(e.target.value)}
+              onBlur={() => setMonthInvalid(monthDraft !== month)}
+            />
+            {monthInvalid && (
+              <FieldError id='pipeline-month-error'>
+                Ingresá un mes válido (AAAA-MM), hasta el mes actual.
+              </FieldError>
+            )}
+          </Field>
           <Field>
             <FieldLabel htmlFor='pipeline-search'>Buscar lead</FieldLabel>
             <Input
@@ -113,6 +175,7 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
           <Field>
             <FieldLabel htmlFor='pipeline-source'>Origen</FieldLabel>
             <NativeSelect
+              className='w-full'
               id='pipeline-source'
               value={source}
               onChange={(e) => {
@@ -133,6 +196,7 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
             <Field>
               <FieldLabel htmlFor='pipeline-owner'>Responsable</FieldLabel>
               <NativeSelect
+                className='w-full'
                 id='pipeline-owner'
                 value={owner}
                 onChange={(e) => {
@@ -153,6 +217,7 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
           <Field>
             <FieldLabel htmlFor='pipeline-stage'>Etapa</FieldLabel>
             <NativeSelect
+              className='w-full'
               id='pipeline-stage'
               value={stage}
               onChange={(e) => {
@@ -168,13 +233,17 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
               ))}
             </NativeSelect>
           </Field>
-        </div>
+        </fieldset>
         <Feedback
-          error={error ?? leads.error}
-          message={message}
-          pending={busy}
-          onRetry={() => void leads.refetch()}
+          error={leads.error ?? catalogs.error ?? (admin ? users.error : null)}
+          onRetry={() => {
+            void leads.refetch();
+            void catalogs.refetch();
+            if (admin) void users.refetch();
+          }}
+          retrying={leads.isFetching || catalogs.isFetching || (admin && users.isFetching)}
         />
+        <Feedback error={error} message={message} pending={busy} />
         <p className='pipeline-instructions'>
           Los estados de contacto son independientes de estas etapas. Solo ADMIN puede corregir un
           cierre. El responsable de la venta es quien tenía asignado el lead.
@@ -184,12 +253,17 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
         ) : (
           leads.data && (
             <>
-              <p role='status'>{leads.data.total} leads · Se muestran hasta 50 por página.</p>
+              <p role='status'>
+                {monthFormat.format(new Date(`${month}-01T00:00:00Z`))} · {leads.data.total} leads ·
+                Se muestran hasta 50 por página.
+              </p>
               {!leads.data.total ? (
                 <EmptyState title='Sin leads' description='No hay leads para estos filtros.' />
               ) : (
                 <div
-                  className='pipeline-scroll'
+                  className='pipeline-scroll focus-visible:outline-ring'
+                  // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Allow arrow-key scrolling of the board.
+                  tabIndex={0}
                   role='region'
                   aria-label='Tablero comercial con desplazamiento horizontal'
                 >
@@ -220,7 +294,7 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
                                   <CardTitle>
                                     <button
                                       type='button'
-                                      className='text-left break-words underline-offset-2 hover:underline'
+                                      className='text-primary focus-visible:outline-ring rounded-sm text-left break-words underline-offset-2 hover:underline'
                                       onClick={() => openLead(l.id)}
                                     >
                                       {l.name}
@@ -238,6 +312,7 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
                                       : 'Sin asignar'}
                                   </p>
                                   <NativeSelect
+                                    className='w-full'
                                     aria-label={`Etapa de ${l.name}`}
                                     value={l.commercialStage}
                                     disabled={busy || (l.commercialStage === 'CLOSED' && !admin)}
@@ -266,7 +341,7 @@ export function CommercialPipeline({ actor }: { actor: Identity }) {
                 page={page}
                 total={leads.data.total}
                 pageSize={50}
-                busy={busy}
+                busy={busy || leads.isFetching}
                 onPage={setPage}
               />
             </>

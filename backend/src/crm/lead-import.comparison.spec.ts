@@ -24,6 +24,8 @@ const row: LeadImportRow = {
   reviewedMatches: [],
   leadId: null,
   outcome: null,
+  sourceFingerprint: null,
+  legacyFingerprints: [],
 };
 const current = {
   id: 'crm',

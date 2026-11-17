@@ -25,15 +25,22 @@ export function ImportRowEditor({
   close: () => void;
 }) {
   const [name, setName] = useState(row.name);
+  const historical = row.metadata.intakeMode === 'HISTORICAL';
   return (
     <form
       className='rounded-lg border p-4'
       onSubmit={(event) => {
         event.preventDefault();
         const values = new FormData(event.currentTarget);
-        const assigned = String(values.get('assignedToId'));
+        const assigned = String(values.get('assignedToId') ?? '');
         void save({
           name,
+          ...(values.get('portfolioClass') && {
+            portfolioClass: String(values.get('portfolioClass')) as
+              | 'ACTIVE'
+              | 'HISTORICAL'
+              | 'UNCLASSIFIED'
+          }),
           email: String(values.get('email')),
           phone: String(values.get('phone')),
           observations: String(values.get('observations')),
@@ -45,6 +52,24 @@ export function ImportRowEditor({
       }}
     >
       <FieldGroup className='grid gap-4 md:grid-cols-2'>
+        {row.metadata.intakeMode === 'HISTORICAL' && (
+          <Field>
+            <FieldLabel>Clasificación de cartera</FieldLabel>
+            <NativeSelect
+              name='portfolioClass'
+              defaultValue={row.portfolioClass ?? ''}
+              disabled={pending}
+            >
+              <NativeSelectOption value=''>Resolver valor desconocido</NativeSelectOption>
+              <NativeSelectOption value='ACTIVE'>En gestión</NativeSelectOption>
+              <NativeSelectOption value='HISTORICAL'>Histórico</NativeSelectOption>
+              <NativeSelectOption value='UNCLASSIFIED'>
+                Pendiente de clasificación
+              </NativeSelectOption>
+            </NativeSelect>
+          </Field>
+        )}
+
         <Field>
           <FieldLabel htmlFor='import-name'>Nombre</FieldLabel>
           <Input
@@ -113,15 +138,24 @@ export function ImportRowEditor({
           </NativeSelect>
         </Field>
         <Field>
-          <FieldLabel htmlFor='import-seller'>Responsable</FieldLabel>
+          <FieldLabel htmlFor='import-seller'>
+            {historical ? 'Responsable actual' : 'Responsable'}
+          </FieldLabel>
           <NativeSelect
             id='import-seller'
             name='assignedToId'
-            defaultValue={row.assignmentResolved ? (row.assignedToId ?? 'AUTO') : ''}
+            defaultValue={
+              row.assignedToId ??
+              ((historical ? row.metadata.allowDistribution : row.assignmentResolved) ? 'AUTO' : '')
+            }
             disabled={pending}
           >
-            <NativeSelectOption value=''>Resolver asesor</NativeSelectOption>
-            <NativeSelectOption value='AUTO'>Reparto automático</NativeSelectOption>
+            <NativeSelectOption value=''>
+              {historical ? 'Sin cambiar responsable ni reparto' : 'Resolver asesor'}
+            </NativeSelectOption>
+            <NativeSelectOption value='AUTO'>
+              {historical ? 'Autorizar reparto si queda En gestión' : 'Reparto automático'}
+            </NativeSelectOption>
             {sellers.map((seller) => (
               <NativeSelectOption key={seller.id} value={seller.id}>
                 {personName(seller)}

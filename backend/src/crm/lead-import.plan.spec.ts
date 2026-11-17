@@ -30,6 +30,8 @@ const row = (
   reviewedMatches: [],
   leadId: null,
   outcome: null,
+  sourceFingerprint: null,
+  legacyFingerprints: [],
   ...patch,
 });
 const plan = (

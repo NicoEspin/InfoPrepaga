@@ -1,5 +1,35 @@
+export type ImportSelection = {
+  actionFilter?: string;
+  ids?: string[];
+  sheet?: string;
+  portfolioClass?: string;
+  problem?: string;
+};
+export type ImportConfiguration = {
+  version: 1;
+  managementAliases?: Record<string, 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED'>;
+  dateFormat?: 'DMY' | 'ISO';
+  sheets: Record<
+    string,
+    Partial<
+      Record<
+        | 'name'
+        | 'phone'
+        | 'email'
+        | 'advisor'
+        | 'observations'
+        | 'originalDate'
+        | 'currentManagement'
+        | 'currentResponsible'
+        | 'lastManaged',
+        { column?: number; value?: string }
+      >
+    >
+  >;
+};
 export type ImportFilter = 'ALL' | 'CREATE' | 'UPDATE' | 'MERGE' | 'DUPLICATES' | 'REVIEW' | 'SKIP';
 export type ImportRow = {
+  portfolioClass: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED' | null;
   comparisons: Array<{
     kind: 'CRM' | 'FILE';
     referenceId: string;
@@ -39,6 +69,11 @@ export type ImportRow = {
   assignmentResolved: boolean;
   decision: 'AUTO' | 'INCLUDE' | 'OMIT';
   metadata: {
+    intakeMode?: string;
+    allowDistribution?: boolean;
+    currentManagement?: string;
+    currentResponsible?: string;
+    originalLastManaged?: string;
     originalDate: string;
     schedule: string;
     segment: string;
@@ -63,11 +98,19 @@ export type ImportRow = {
   }>;
 };
 export type ImportPreview = {
+  result: ImportResult;
+  mode: 'NEW' | 'HISTORICAL';
+  configuration: ImportConfiguration | null;
+  selectableTotal: number;
+  problems: Record<string, number>;
+  managementValues: Array<{ value: string; count: number }>;
+  currentResponsibles: Array<{ alias: string; count: number }>;
   reviewToken: string;
   id: string;
   fileName: string;
   version: number;
-  status: 'REVIEW' | 'IMPORTING' | 'COMPLETE';
+  status: 'REVIEW' | 'IMPORTING' | 'PARTIAL' | 'COMPLETE';
+  imported: number;
   expiresAt: string;
   sheets: string[];
   availableSheets: string[];
@@ -76,14 +119,23 @@ export type ImportPreview = {
   rowTotal: number;
   page: number;
   pageSize: number;
-  groups: Array<{ sheet: string; group: string; sourceId: string | null }>;
+  groups: Array<{
+    count: number;
+    blocked: number;
+    sheet: string;
+    group: string;
+    sourceId: string | null;
+  }>;
   advisors: Array<{
     advisor: string;
+    count: number;
     variants: string[];
     resolved: boolean;
     assignedToId: string | null;
   }>;
   summary: {
+    portfolio: Record<string, number>;
+    distribution: number;
     detected: number;
     uniqueContacts: number;
     creates: number;
@@ -95,6 +147,8 @@ export type ImportPreview = {
     merged: number;
     imported: number;
     omitted: number;
+    alreadyRegistered: number;
+    userOmitted: number;
     invalid: number;
     pending: number;
     duplicates: number;
@@ -103,7 +157,18 @@ export type ImportPreview = {
     cleanupCandidates: Record<'INVALID_EMAIL' | 'INVALID_PHONE' | 'FORMULA_PHONE', number>;
   };
 };
+export type ImportResult = {
+  created: number;
+  updated: number;
+  merged: number;
+  omitted: number;
+  alreadyRegistered: number;
+  pending: number;
+};
 export type ImportBatchSummary = {
+  result: ImportResult;
+  configuration: ImportConfiguration | null;
+  mode: 'NEW' | 'HISTORICAL';
   id: string;
   fileName: string;
   status: string;
@@ -111,24 +176,37 @@ export type ImportBatchSummary = {
   total: number;
 };
 export type ImportProgress = {
+  result: ImportResult;
   created: number;
   updated: number;
   merged: number;
   excluded: number;
   id: string;
-  status: 'IMPORTING' | 'COMPLETE';
+  status: 'IMPORTING' | 'PARTIAL' | 'COMPLETE';
   version: number;
   imported: number;
   omitted: number;
 };
 export type RowChanges = Partial<
   Pick<ImportRow, 'name' | 'email' | 'phone' | 'observations' | 'decision' | 'assignedToId'>
-> & { sourceId?: string; acknowledgeDuplicates?: boolean };
+> & {
+  portfolioClass?: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED';
+  sourceId?: string;
+  acknowledgeDuplicates?: boolean;
+};
 export type BatchChanges = {
+  bulk?: {
+    selection: ImportSelection;
+    action: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED' | 'OMIT' | 'AUTO' | 'ASSIGN' | 'DISTRIBUTE';
+    assignedToId?: string;
+    expectedCount: number;
+  };
+
   bulkCleanup?: 'INVALID_EMAIL' | 'INVALID_PHONE' | 'FORMULA_PHONE';
   sheets?: string[];
   duplicates?: 'INCLUDE' | 'OMIT' | 'AUTO';
   mappings?: Array<{
+    currentResponsible?: boolean;
     remember?: boolean;
     aliases?: string[];
     sheet?: string;
@@ -140,7 +218,7 @@ export type BatchChanges = {
 };
 
 export type ImportMapping = {
-  kind: 'ORIGIN' | 'ADVISOR' | 'DEFAULT';
+  kind: 'ORIGIN' | 'ADVISOR' | 'DEFAULT' | 'CURRENT_RESPONSIBLE';
   scope: string;
   key: string;
   sourceId: string | null;
@@ -167,7 +245,20 @@ export type MappingUpdate = MappingIdentity & {
   assignedToId?: string | null;
 };
 export type ImportAppearance = {
-  corrections: { email: string | null; phone: string | null; formulaPhoneOmitted: boolean } | null;
+  intakeMode: string;
+  currentManagement: string;
+  currentResponsible: string;
+  originalLastManaged: string;
+  declaredLastManagedAt: string;
+  portfolioClass: string;
+
+  corrections: {
+    email: string | null;
+    phone: string | null;
+    appliedEmail: string;
+    appliedPhone: string;
+    formulaPhoneOmitted: boolean;
+  } | null;
   id: string;
   fileName: string;
   batchId: string;

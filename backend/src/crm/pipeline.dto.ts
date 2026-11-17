@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsInt,
   IsString,
+  Matches,
   MaxLength,
   Min,
   ValidateIf,
@@ -11,6 +12,17 @@ import {
 import { LeadQueryDto } from './crm.dto';
 
 export class PipelineQueryDto extends LeadQueryDto {
+  @ApiPropertyOptional({
+    example: '2026-10',
+    description: 'Mes AAAA-MM; por defecto, el mes actual de Buenos Aires',
+  })
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsString()
+  @Matches(/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/, {
+    message: 'El mes debe tener el formato AAAA-MM',
+  })
+  month?: string;
+
   @ApiPropertyOptional({ enum: CommercialStage })
   @ValidateIf((_o, v: unknown) => v !== undefined)
   @IsEnum(CommercialStage)

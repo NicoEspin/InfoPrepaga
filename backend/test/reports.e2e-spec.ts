@@ -1,6 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient, CommercialStage } from '@prisma/client';
+import { PrismaClient, CommercialStage, type Prisma } from '@prisma/client';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -452,7 +452,9 @@ suite('Reports and persistent pipeline with isolated PostgreSQL', () => {
       .get('/crm/reports?page=1&pageSize=1')
       .set(auth(admin))
       .expect(200);
-    expect((list.body as { items: unknown[] }).items).toHaveLength(1);
+    const { items } = list.body as { items: Pick<Snapshot, 'from' | 'to'>[] };
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ from: stored.from, to: stored.to });
     expect(
       (list.body as { items: { snapshot?: Snapshot }[] }).items[0].snapshot,
     ).toBeUndefined();
@@ -609,4 +611,158 @@ suite('Reports and persistent pipeline with isolated PostgreSQL', () => {
     });
     expect(automatic.assignedToId).toBe(sellerId);
   });
+  it('excludes migrated intake, counts later real sales and never changes saved snapshots', async () => {
+    const before = (
+      await api()
+        .post('/crm/reports/preview')
+        .set(auth(admin))
+        .send(input())
+        .expect(201)
+    ).body as Snapshot;
+    const migrated = await lead('2026-05-10T15:00:00Z');
+    await db.lead.update({
+      where: { id: migrated },
+      data: {
+        intakeMode: 'HISTORICAL',
+        portfolioClass: 'ACTIVE',
+        autoAssignmentEligible: false,
+      },
+    });
+    await event(migrated, 'CLOSED', '2026-05-20T15:00:00Z');
+    const after = (
+      await api()
+        .post('/crm/reports/preview')
+        .set(auth(admin))
+        .send(input())
+        .expect(201)
+    ).body as Snapshot;
+    expect(after.calculationVersion).toBe(2);
+    expect(after.summary.entered).toBe(before.summary.entered);
+    expect(after.summary.cohortClosures).toBe(before.summary.cohortClosures);
+    expect(after.summary.periodClosures).toBe(
+      before.summary.periodClosures + 1,
+    );
+    if (reportId) {
+      const saved = await db.commercialReport.findUniqueOrThrow({
+        where: { id: reportId },
+      });
+      expect(saved.snapshot).toEqual(stored);
+    }
+  });
+
+  it('lists and counts only the selected Buenos Aires month within the actor scope', async () => {
+    const now = new Date();
+    const current = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+    })
+      .format(now)
+      .slice(0, 7);
+    const year = Number(current.slice(0, 4)) - 2;
+    const december = `${year}-12`;
+    const january = `${year + 1}-01`;
+    const name = 'Cohorte mensual sintética';
+    const create = (data: Partial<Prisma.LeadUncheckedCreateInput> = {}) =>
+      db.lead.create({
+        data: {
+          name,
+          sourceId,
+          assignedToId: sellerId,
+          createdAt: now,
+          ...data,
+        },
+        select: { id: true },
+      });
+    const [
+      currentLead,
+      decemberStart,
+      decemberEnd,
+      januaryStart,
+      migrated,
+      otherLead,
+    ] = await Promise.all([
+      create(),
+      create({ createdAt: new Date(`${december}-01T03:00:00.000Z`) }),
+      create({ createdAt: new Date(`${january}-01T02:59:59.999Z`) }),
+      create({ createdAt: new Date(`${january}-01T03:00:00.000Z`) }),
+      create({
+        intakeMode: 'HISTORICAL',
+        originDate: new Date(`${december}-01T00:00:00Z`),
+        commercialStage: 'PROPOSAL',
+      }),
+      create({
+        assignedToId: otherId,
+        intakeMode: 'HISTORICAL',
+        originDate: new Date(`${december}-31T00:00:00Z`),
+      }),
+      create({ createdAt: new Date(`${december}-01T02:59:59.999Z`) }),
+      create({ intakeMode: 'HISTORICAL' }),
+      ...(['HISTORICAL', 'UNCLASSIFIED'] as const).map((portfolioClass) =>
+        create({
+          portfolioClass,
+          intakeMode: 'HISTORICAL',
+          originDate: new Date(`${december}-02T00:00:00Z`),
+        }),
+      ),
+    ]);
+    async function list(token: string, filters: Record<string, string> = {}) {
+      const response = await api()
+        .get('/crm/pipeline')
+        .set(auth(token))
+        .query({ q: name, ...filters })
+        .expect(200);
+      return response.body as {
+        items: { id: string; commercialStage: CommercialStage }[];
+        total: number;
+        page: number;
+      };
+    }
+    const currentBoard = await list(admin);
+    expect(currentBoard).toEqual(await list(admin, { month: current }));
+    expect(currentBoard.total).toBe(1);
+    expect(currentBoard.items.map(({ id }) => id)).toEqual([currentLead.id]);
+
+    const adminBoard = await list(admin, { month: december });
+    expect(adminBoard.total).toBe(4);
+    expect(adminBoard.items.map(({ id }) => id)).toContain(otherLead.id);
+    const firstPage = await list(seller, { month: december, pageSize: '2' });
+    const secondPage = await list(seller, {
+      month: december,
+      pageSize: '2',
+      page: '2',
+    });
+    expect(firstPage).toMatchObject({ total: 3, page: 1 });
+    expect(secondPage).toMatchObject({ total: 3, page: 2 });
+    expect(
+      [...firstPage.items, ...secondPage.items].map(({ id }) => id).sort(),
+    ).toEqual([decemberStart.id, decemberEnd.id, migrated.id].sort());
+    expect(
+      await list(seller, { month: december, assignedToId: otherId }),
+    ).toMatchObject({
+      total: 0,
+      items: [],
+    });
+    const proposals = await list(seller, {
+      month: december,
+      sourceId,
+      stage: 'PROPOSAL',
+    });
+    expect(proposals.total).toBe(1);
+    expect(proposals.items[0]).toMatchObject({
+      id: migrated.id,
+      commercialStage: 'PROPOSAL',
+    });
+    const januaryBoard = await list(seller, { month: january });
+    expect(januaryBoard.items.map(({ id }) => id)).toEqual([januaryStart.id]);
+  });
+
+  it.each(['', '2026-1', '2026-00', '2026-13', '2026-01-01', '9999-12'])(
+    'rejects an invalid or future pipeline month (%s)',
+    async (month) => {
+      await api()
+        .get('/crm/pipeline')
+        .set(auth(admin))
+        .query({ month })
+        .expect(400);
+    },
+  );
 });

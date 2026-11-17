@@ -30,7 +30,6 @@ import {
   TaskQueryDto,
   UserSettingsDto,
 } from './crm.dto';
-
 const userSelect = {
   id: true,
   firstName: true,
@@ -46,7 +45,6 @@ const taskInclude = {
   owner: { select: userSelect },
 } as const;
 type Tx = Prisma.TransactionClient;
-
 @Injectable()
 export class CrmService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CrmService.name);
@@ -54,12 +52,10 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
   private running?: Promise<void>;
   private stopping = false;
   private readonly jobLog = new PeriodicJobLog();
-
   constructor(
     private readonly accounts: AccountsService,
     private readonly prisma: PrismaService,
   ) {}
-
   onModuleInit() {
     this.timer = setInterval(() => this.schedulePending(), 30_000);
     this.timer.unref();
@@ -81,7 +77,6 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
         this.running = undefined;
       });
   }
-
   async write<T>(action: (tx: Tx) => Promise<T>): Promise<T> {
     return this.prisma.$transaction(
       async (tx) => {
@@ -187,7 +182,11 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
   }
   private async drain(tx: Tx) {
     const pending = await tx.lead.findMany({
-      where: { assignedToId: null },
+      where: {
+        assignedToId: null,
+        portfolioClass: 'ACTIVE',
+        autoAssignmentEligible: true,
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: 50,
       select: { id: true },
@@ -210,12 +209,19 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
   }
   async distributePending() {
     // Idle maintenance must not queue behind a long-running commercial import.
-    if (!(await this.prisma.lead.count({ where: { assignedToId: null } })))
+    if (
+      !(await this.prisma.lead.count({
+        where: {
+          assignedToId: null,
+          portfolioClass: 'ACTIVE',
+          autoAssignmentEligible: true,
+        },
+      }))
+    )
       return 0;
     const result = await this.maintenanceWrite((tx) => this.drain(tx));
     return result.busy ? 0 : result.value;
   }
-
   async catalogs(actor: AuthenticatedUser) {
     leadScope(actor);
     return {
@@ -314,7 +320,19 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
     query: LeadQueryDto,
     actor: AuthenticatedUser,
   ): Prisma.LeadWhereInput {
+    if (query.importBatchId) assertAdmin(actor);
     const filters: Prisma.LeadWhereInput = {
+      ...(query.importBatchId && {
+        importAppearances: {
+          some: {
+            batchId: query.importBatchId,
+            batch: { ownerId: actor.id },
+          },
+        },
+      }),
+      ...(query.portfolioClass !== 'ALL' && {
+        portfolioClass: query.portfolioClass ?? 'ACTIVE',
+      }),
       ...(query.status && { status: query.status }),
       ...(query.sourceId && { sourceId: query.sourceId }),
       ...(query.assignedToId && { assignedToId: query.assignedToId }),
@@ -392,6 +410,22 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
               : {};
           const value = (key: string) =>
             typeof original[key] === 'string' ? original[key] : '';
+          const reviewed =
+            original.reviewedOriginal &&
+            typeof original.reviewedOriginal === 'object' &&
+            !Array.isArray(original.reviewedOriginal)
+              ? original.reviewedOriginal
+              : {};
+          const originalPhone = value('originalPhone');
+          const correctedPhone =
+            typeof reviewed.phone === 'string'
+              ? reviewed.phone
+              : originalPhone && originalPhone !== value('phone')
+                ? originalPhone
+                : null;
+          const correctedEmail =
+            typeof reviewed.email === 'string' ? reviewed.email : null;
+          const formulaPhoneOmitted = reviewed.formulaPhoneOmitted === true;
           return {
             id: entry.id,
             fileName: entry.fileName,
@@ -402,22 +436,23 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
             originalAdvisor: value('originalAdvisor') || value('advisor'),
             observations: value('observations'),
             originalDate: value('originalDate'),
+            intakeMode: value('intakeMode'),
+            currentManagement: value('currentManagement'),
+            currentResponsible: value('currentResponsible'),
+            originalLastManaged: value('originalLastManaged'),
+            declaredLastManagedAt: value('lastManaged'),
+            portfolioClass: value('portfolioClass'),
             group: value('group'),
             corrections:
-              original.reviewedOriginal &&
-              typeof original.reviewedOriginal === 'object' &&
-              !Array.isArray(original.reviewedOriginal)
+              correctedPhone !== null ||
+              correctedEmail !== null ||
+              formulaPhoneOmitted
                 ? {
-                    email:
-                      typeof original.reviewedOriginal.email === 'string'
-                        ? original.reviewedOriginal.email
-                        : null,
-                    phone:
-                      typeof original.reviewedOriginal.phone === 'string'
-                        ? original.reviewedOriginal.phone
-                        : null,
-                    formulaPhoneOmitted:
-                      original.reviewedOriginal.formulaPhoneOmitted === true,
+                    email: correctedEmail,
+                    phone: correctedPhone,
+                    appliedEmail: value('email'),
+                    appliedPhone: value('phone'),
+                    formulaPhoneOmitted,
                   }
                 : null,
             createdAt: entry.createdAt,
@@ -455,6 +490,40 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
       { isolationLevel: 'RepeatableRead' },
     );
   }
+  async classifyPortfolio(
+    dto: import('./crm.dto').PortfolioBulkDto,
+    actor: AuthenticatedUser,
+  ) {
+    assertAdmin(actor);
+    return this.write(async (tx) => {
+      if (new Set(dto.targets.map((t) => t.id)).size !== dto.targets.length)
+        throw new BadRequestException('Contactos repetidos');
+      for (const target of dto.targets) {
+        const lead = await this.visibleLead(tx, target.id, actor);
+        this.checkVersion(lead.version, target.version);
+        if (dto.portfolioClass === 'ACTIVE' && !lead.assignedToId)
+          throw new BadRequestException(
+            'Asigná un responsable antes de activar la cartera',
+          );
+        if (lead.portfolioClass === dto.portfolioClass) continue;
+        await tx.lead.update({
+          where: { id: lead.id },
+          data: {
+            portfolioClass: dto.portfolioClass,
+            autoAssignmentEligible: false,
+            version: { increment: 1 },
+          },
+        });
+        await this.activity(tx, lead.id, actor.id, 'portfolio-classified', {
+          from: lead.portfolioClass,
+          to: dto.portfolioClass,
+          reason: dto.reason,
+          leadVersion: lead.version + 1,
+        });
+      }
+      return { count: dto.targets.length };
+    });
+  }
   async createLead(dto: CreateLeadDto, actor: AuthenticatedUser) {
     assertAdmin(actor);
     return this.write((tx) => this.createLeadInTransaction(tx, dto, actor));
@@ -469,6 +538,11 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
       batchId: string;
       sheet: string;
       rowNumber: number;
+      mode?: 'NEW' | 'HISTORICAL';
+      portfolioClass?: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED';
+      allowDistribution?: boolean;
+      originDate?: Date | null;
+      declaredLastManagedAt?: Date | null;
     },
   ) {
     assertAdmin(actor);
@@ -478,12 +552,28 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
     if (!dto.email?.trim() && !dto.phone?.trim())
       throw new BadRequestException('Ingresá teléfono o correo');
     // Older pending leads receive the preceding turns, including across batches.
-    const hasPending = await tx.lead.count({ where: { assignedToId: null } });
+    const hasPending = await tx.lead.count({
+      where: {
+        assignedToId: null,
+        portfolioClass: 'ACTIVE',
+        autoAssignmentEligible: true,
+      },
+    });
+    const portfolioClass = imported?.portfolioClass ?? 'ACTIVE';
+    const eligible =
+      portfolioClass === 'ACTIVE' &&
+      (imported?.mode !== 'HISTORICAL' || imported.allowDistribution === true);
     const assignedToId =
-      imported?.assignedToId ?? (hasPending ? null : await this.nextSeller(tx));
+      imported?.assignedToId ??
+      (eligible && !hasPending ? await this.nextSeller(tx) : null);
     const lead = await tx.lead.create({
       data: {
         ...dto,
+        portfolioClass,
+        intakeMode: imported?.mode ?? 'NEW',
+        autoAssignmentEligible: eligible,
+        originDate: imported?.originDate,
+        declaredLastManagedAt: imported?.declaredLastManagedAt,
         ...contactKeys(dto.email, dto.phone),
         ...(imported && { importData: imported.metadata }),
         email: dto.email || null,

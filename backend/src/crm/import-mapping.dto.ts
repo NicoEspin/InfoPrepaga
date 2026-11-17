@@ -11,14 +11,18 @@ import {
 import { PageDto } from './crm.dto';
 
 export class MappingQueryDto extends PageDto {
-  @ApiPropertyOptional({ enum: ['ORIGIN', 'ADVISOR', 'DEFAULT'] })
+  @ApiPropertyOptional({
+    enum: ['ORIGIN', 'ADVISOR', 'DEFAULT', 'CURRENT_RESPONSIBLE'],
+  })
   @ValidateIf((_o, value: unknown) => value !== undefined)
-  @IsIn(['ORIGIN', 'ADVISOR', 'DEFAULT'])
+  @IsIn(['ORIGIN', 'ADVISOR', 'DEFAULT', 'CURRENT_RESPONSIBLE'])
   kind?: string;
 }
 export class MappingIdentityDto {
-  @ApiProperty({ enum: ['ORIGIN', 'ADVISOR', 'DEFAULT'] })
-  @IsIn(['ORIGIN', 'ADVISOR', 'DEFAULT'])
+  @ApiProperty({
+    enum: ['ORIGIN', 'ADVISOR', 'DEFAULT', 'CURRENT_RESPONSIBLE'],
+  })
+  @IsIn(['ORIGIN', 'ADVISOR', 'DEFAULT', 'CURRENT_RESPONSIBLE'])
   kind!: string;
   @ApiProperty() @IsString() @MinLength(1) @MaxLength(100) scope!: string;
   @ApiProperty() @IsString() @MinLength(1) @MaxLength(300) key!: string;

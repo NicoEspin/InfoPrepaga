@@ -47,7 +47,10 @@ export type SavedReport = {
   snapshot: Snapshot;
 };
 export type ReportPage = {
-  items: Pick<SavedReport, 'id' | 'name' | 'generatedAt' | 'authorId'>[];
+  items: (Pick<SavedReport, 'id' | 'name' | 'generatedAt' | 'authorId'> & {
+    from: string | null;
+    to: string | null;
+  })[];
   total: number;
   page: number;
   pageSize: number;

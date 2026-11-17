@@ -273,6 +273,23 @@ suite(
       const imported = await db.lead.findUniqueOrThrow({
         where: { id: current.items[1].leadId! },
       });
+      const batchLeads = `/crm/leads?portfolioClass=ALL&importBatchId=${id}`;
+      await api().get(batchLeads).expect(401);
+      await api().get(batchLeads).set(auth(vendor)).expect(403);
+      await api()
+        .get(batchLeads)
+        .set(auth(otherAdmin))
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({ total: 0, items: [] });
+        });
+      await api()
+        .get(batchLeads)
+        .set(auth())
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({ total: 3 });
+        });
       expect(imported.importData).toMatchObject({
         sheet: 'Fede',
         originalDate: '2/8',
@@ -285,6 +302,17 @@ suite(
         'unique@example.test',
       ]);
       const replay = await preview(again);
+      expect(replay).toMatchObject({
+        status: 'COMPLETE',
+        result: {
+          alreadyRegistered: 4,
+          created: 0,
+          updated: 0,
+          merged: 0,
+          omitted: 0,
+          pending: 0,
+        },
+      });
       expect(
         replay.items.every((row) => row.replay && row.action === 'SKIP'),
       ).toBe(true);
@@ -421,7 +449,9 @@ suite(
         .post(`/crm/lead-imports/${id}/confirm`)
         .set(auth())
         .send({ version: current.version })
-        .expect(400);
+        .expect(201);
+      current = await preview(id);
+      expect(current.status).toBe('PARTIAL');
       await api()
         .patch(`/crm/lead-imports/${id}/rows/${current.items[0].id}`)
         .set(auth())
@@ -436,7 +466,9 @@ suite(
         .post(`/crm/lead-imports/${id}/confirm`)
         .set(auth())
         .send({ version: current.version })
-        .expect(400);
+        .expect(201);
+      current = await preview(id);
+      expect(current.status).toBe('PARTIAL');
       await db.user.update({
         where: { id: sellerId },
         data: { isActive: true },
@@ -639,7 +671,9 @@ suite(
         .post(`/crm/lead-imports/${id}/confirm`)
         .set(auth())
         .send({ version: current.version })
-        .expect(400);
+        .expect(201);
+      current = await preview(id);
+      expect(current.status).toBe('PARTIAL');
       await api()
         .patch(`/crm/lead-imports/${id}/rows/${current.items[0].id}`)
         .set(auth())
@@ -939,17 +973,22 @@ suite(
       ]);
       sheet.addRow(['5/8', 'Conflicto Dos', '011 15 2345 6801']);
       const bytes = Buffer.from(await book.xlsx.writeBuffer());
-      const uploadFile = async () => {
+      const uploadFile = async (content = bytes) => {
         const response = await api()
           .post('/crm/lead-imports')
           .set(auth())
-          .attach('file', bytes, 'synthetic-bulk.xlsx')
+          .attach('file', content, 'synthetic-bulk.xlsx')
           .expect(201);
         const id = (response.body as { id: string }).id;
         await patch(id, { mappings: [{ sheet: 'Fede', sourceId }] });
         return id;
       };
       const id = await uploadFile();
+      // Drafts prepared before the migration have neither immutable digest.
+      await db.leadImportRow.updateMany({
+        where: { batchId: id, rowNumber: 3 },
+        data: { sourceFingerprint: null, legacyFingerprints: [] },
+      });
       let current = await preview(id);
       expect(current.summary.cleanupCandidates).toEqual({
         INVALID_EMAIL: 1,
@@ -994,10 +1033,22 @@ suite(
           .corrections,
       ).toMatchObject({ email: 'invalid-bulk-email' });
       const repeated = await uploadFile();
-      for (const kind of ['INVALID_EMAIL', 'INVALID_PHONE', 'FORMULA_PHONE'])
-        await patch(repeated, { bulkCleanup: kind });
       const replay = await preview(repeated);
       expect(replay.items.filter((row) => row.replay)).toHaveLength(3);
+      expect(replay.result).toMatchObject({
+        alreadyRegistered: 3,
+        omitted: 0,
+        pending: 2,
+      });
+      sheet.getCell('C3').value = 'different-invalid-phone';
+      const changed = await preview(
+        await uploadFile(Buffer.from(await book.xlsx.writeBuffer())),
+      );
+      expect(changed.items.find((row) => row.rowNumber === 3)).toMatchObject({
+        replay: false,
+        action: 'REVIEW',
+        state: 'CORRECTION',
+      });
       expect(
         await db.leadImportAppearance.count({ where: { batchId: id } }),
       ).toBe(3);
@@ -1033,9 +1084,10 @@ suite(
         .post(`/crm/lead-imports/${ambiguous}/confirm`)
         .set(auth())
         .send({ version: ambiguousPreview.version })
-        .expect(400);
+        .expect(201);
+      expect((await preview(ambiguous)).status).toBe('PARTIAL');
     });
-    it('requires explicit exclusion, imports valid rows and filters exceptions on the server', async () => {
+    it('retains exceptions on partial import and supports deliberate exclusion', async () => {
       const id = await upload(['exclude-valid@example.test', 'invalid']);
       let current = await prepare(id);
       const exceptions = await api()
@@ -1051,7 +1103,9 @@ suite(
         .post(`/crm/lead-imports/${id}/confirm`)
         .set(auth())
         .send({ version: current.version })
-        .expect(400);
+        .expect(201);
+      current = await preview(id);
+      expect(current.status).toBe('PARTIAL');
       await api()
         .post(`/crm/lead-imports/${id}/confirm`)
         .set(auth())
@@ -1063,6 +1117,180 @@ suite(
         await db.leadImportBatch.findUniqueOrThrow({ where: { id } }),
       ).toMatchObject({ excluded: 1, omitted: 1 });
     });
+    it('isolates historical portfolio, resolves all filtered pages, preserves existing management and resumes exceptions', async () => {
+      const book = new ExcelJS.Workbook();
+      const sheet = book.addWorksheet('Fede');
+      sheet.addRow([
+        'FECHA',
+        'NOMBRE',
+        'TEL',
+        'HORARIO',
+        'MAIL',
+        'SEGMENTO',
+        'ASESOR',
+        'OBSERVACION',
+        'Gestion_actual',
+        'Responsable_actual',
+        'Ultima_gestion',
+      ]);
+      for (let i = 0; i < 56; i++)
+        sheet.addRow([
+          '2026-05-02',
+          `Migrado sintético ${i}`,
+          '',
+          '',
+          `migration-${i}@example.test`,
+          '',
+          'Asesor histórico distinto',
+          '',
+          i === 0 ? 'SI' : i === 55 ? 'valor desconocido' : 'NO',
+          '',
+          '5/8',
+        ]);
+      const buffer = Buffer.from(await book.xlsx.writeBuffer());
+      const uploaded = await api()
+        .post('/crm/lead-imports')
+        .set(auth())
+        .field('mode', 'HISTORICAL')
+        .attach('file', buffer, 'history-synthetic.xlsx')
+        .expect(201);
+      const id = (uploaded.body as { id: string }).id;
+      await patch(id, { mappings: [{ sheet: 'Fede', sourceId }] });
+      let current = await preview(id);
+      expect(current.mode).toBe('HISTORICAL');
+      expect(
+        new Date(current.expiresAt).getTime() - Date.now(),
+      ).toBeGreaterThan(89 * 86400000);
+      expect(current.summary.pending).toBe(54);
+      expect(current.summary.review).toBe(2);
+      const token = current.version;
+      const bulk = {
+        selection: { portfolioClass: 'HISTORICAL' },
+        action: 'HISTORICAL',
+        expectedCount: 54,
+      };
+      await api()
+        .patch(`/crm/lead-imports/${id}`)
+        .set(auth(vendor))
+        .send({ version: token, reviewToken: current.reviewToken, bulk })
+        .expect(403);
+      await patch(id, { bulk });
+      await api()
+        .patch(`/crm/lead-imports/${id}`)
+        .set(auth())
+        .send({ version: token, reviewToken: current.reviewToken, bulk })
+        .expect(409);
+      current = await preview(id);
+      const rotation = await db.assignmentState.findUnique({
+        where: { id: 1 },
+      });
+      await api()
+        .post(`/crm/lead-imports/${id}/confirm`)
+        .set(auth())
+        .send({ version: current.version })
+        .expect(201);
+      current = await preview(id);
+      expect(current.status).toBe('PARTIAL');
+      expect(current.summary.imported).toBe(54);
+      const imported = await db.lead.findMany({
+        where: { intakeMode: 'HISTORICAL' },
+      });
+      expect(imported).toHaveLength(54);
+      expect(
+        imported.every(
+          (lead) =>
+            lead.assignedToId === null &&
+            !lead.autoAssignmentEligible &&
+            lead.portfolioClass === 'HISTORICAL' &&
+            lead.declaredLastManagedAt === null,
+        ),
+      ).toBe(true);
+      const { CrmService } = await import('../src/crm/crm.service.js');
+      await app.get(CrmService).distributePending();
+      expect(await db.assignmentState.findUnique({ where: { id: 1 } })).toEqual(
+        rotation,
+      );
+      const pipeline = await api()
+        .get('/crm/pipeline?pageSize=100')
+        .set(auth())
+        .expect(200);
+      expect(
+        (pipeline.body as { items: { id: string }[] }).items.some((item) =>
+          imported.some((lead) => lead.id === item.id),
+        ),
+      ).toBe(false);
+      const own = await api()
+        .get('/crm/leads?portfolioClass=HISTORICAL')
+        .set(auth(vendor))
+        .expect(200);
+      expect((own.body as { total: number }).total).toBe(0);
+      await patch(id, {
+        bulk: {
+          selection: { portfolioClass: 'ACTIVE' },
+          action: 'ASSIGN',
+          assignedToId: sellerId,
+          expectedCount: 1,
+        },
+      });
+      current = await preview(id);
+      await api()
+        .post(`/crm/lead-imports/${id}/confirm`)
+        .set(auth())
+        .send({ version: current.version })
+        .expect(201);
+      const active = await db.lead.findFirstOrThrow({
+        where: { email: 'migration-0@example.test' },
+      });
+      expect(active).toMatchObject({
+        portfolioClass: 'ACTIVE',
+        assignedToId: sellerId,
+        intakeMode: 'HISTORICAL',
+        autoAssignmentEligible: false,
+      });
+      await api()
+        .patch(`/crm/leads/portfolio`)
+        .set(auth(vendor))
+        .send({
+          targets: [{ id: active.id, version: active.version }],
+          portfolioClass: 'HISTORICAL',
+          reason: 'Prueba',
+        })
+        .expect(403);
+      await api()
+        .patch(`/crm/leads/portfolio`)
+        .set(auth())
+        .send({
+          targets: [{ id: imported[0].id, version: imported[0].version }],
+          portfolioClass: 'ACTIVE',
+          reason: 'Activar sin responsable',
+        })
+        .expect(400);
+      const again = await api()
+        .post('/crm/lead-imports')
+        .set(auth())
+        .field('mode', 'HISTORICAL')
+        .attach('file', buffer, 'history-synthetic.xlsx')
+        .expect(201);
+      const againId = (again.body as { id: string }).id;
+      await patch(againId, { mappings: [{ sheet: 'Fede', sourceId }] });
+      const repeated = await preview(againId);
+      expect(repeated.summary.creates).toBe(0);
+      expect(repeated.items.filter((row) => row.replay).length).toBeGreaterThan(
+        0,
+      );
+      await api()
+        .post(`/crm/lead-imports/${againId}/confirm`)
+        .set(auth())
+        .send({ version: repeated.version })
+        .expect(201);
+      expect(await db.lead.count({ where: { intakeMode: 'HISTORICAL' } })).toBe(
+        55,
+      );
+      expect(
+        (await db.lead.findUniqueOrThrow({ where: { id: active.id } }))
+          .assignedToId,
+      ).toBe(sellerId);
+    }, 60000);
     it('runs both maintenance jobs while idle without acquiring the commercial lock', async () => {
       // Drain leftovers first; no real-world records are used in this disposable schema.
       await db.user.update({

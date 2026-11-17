@@ -1,3 +1,4 @@
+import { portfolioMetadata } from './import-portfolio';
 import { createHash } from 'node:crypto';
 import type { LeadImportRow } from '@prisma/client';
 import { contactKeys } from './contact-keys';
@@ -8,7 +9,6 @@ import {
   compareImportContact,
   type ComparisonContext,
 } from './lead-import.comparison';
-
 export type ExistingImportContact = {
   id: string;
   name: string;
@@ -44,6 +44,22 @@ export function appearanceFingerprint(
     | 'phone'
     | 'observations'
     | 'metadata'
+    | 'sourceFingerprint'
+  >,
+) {
+  return row.sourceFingerprint ?? legacyAppearanceFingerprint(row);
+}
+
+export function legacyAppearanceFingerprint(
+  row: Pick<
+    LeadImportRow,
+    | 'sheet'
+    | 'rowNumber'
+    | 'name'
+    | 'email'
+    | 'phone'
+    | 'observations'
+    | 'metadata'
   >,
 ) {
   return createHash('sha256')
@@ -58,16 +74,15 @@ export function appearanceFingerprint(
         typeof row.metadata === 'object' &&
         !Array.isArray(row.metadata)
           ? Object.fromEntries(
-              Object.entries(row.metadata).sort(([a], [b]) =>
-                a.localeCompare(b),
-              ),
+              Object.entries(row.metadata)
+                .filter(([key]) => key !== 'reviewDecisions')
+                .sort(([a], [b]) => a.localeCompare(b)),
             )
           : row.metadata,
       ]),
     )
     .digest('hex');
 }
-
 /** Conservative connected components: a shared contact key never overrides identity conflicts. */
 export function planLeadImport(
   rows: LeadImportRow[],
@@ -79,7 +94,10 @@ export function planLeadImport(
   context: ComparisonContext = {},
 ) {
   const active = rows.filter(
-    (row) => sheets.includes(row.sheet) && row.decision !== 'OMIT',
+    (row) =>
+      sheets.includes(row.sheet) &&
+      row.decision !== 'OMIT' &&
+      (row.leadId || !seen.has(appearanceFingerprint(row))),
   );
   const keys = new Map(
     rows.map((row) => [row.id, contactKeys(row.email, row.phone)]),
@@ -139,6 +157,9 @@ export function planLeadImport(
   const plans = new Map<
     string,
     {
+      portfolioClass: ReturnType<typeof portfolioMetadata>['classification'];
+      assignedToId: string | null;
+      allowDistribution: boolean;
       conflict: boolean;
       conflictReasons: string[];
       leaderId: string;
@@ -181,13 +202,23 @@ export function planLeadImport(
     const owners = new Set(
       group.rows.map((row) => row.assignedToId).filter(Boolean),
     );
+    const classifications = new Set(
+      group.rows
+        .map((row) => portfolioMetadata(row.metadata).classification)
+        .filter((value) => value && value !== 'UNCLASSIFIED'),
+    );
+    const portfolioClass =
+      classifications.values().next().value ??
+      portfolioMetadata(group.rows[0].metadata).classification;
     const conflict =
+      classifications.size > 1 ||
       names.size > 1 ||
       emails.size > 1 ||
       phones.size > 1 ||
       group.leads.length > 1 ||
       (!group.leads.length && owners.size > 1);
     const conflictReasons = [
+      classifications.size > 1 ? 'PORTFOLIO_MISMATCH' : null,
       names.size > 1 ? 'NAME_MISMATCH' : null,
       emails.size > 1 ? 'EMAIL_MISMATCH' : null,
       phones.size > 1 ? 'PHONE_MISMATCH' : null,
@@ -238,6 +269,11 @@ export function planLeadImport(
           })),
       ];
       plans.set(row.id, {
+        portfolioClass,
+        assignedToId: [...owners][0] ?? null,
+        allowDistribution: group.rows.some(
+          (row) => portfolioMetadata(row.metadata).allowDistribution,
+        ),
         conflict,
         conflictReasons,
         leaderId: leader.id,
@@ -253,11 +289,34 @@ export function planLeadImport(
     const group = plans.get(row.id);
     const active = sheets.includes(row.sheet);
     const contactErrors = importContactErrors(row);
+    const portfolio = portfolioMetadata(row.metadata);
+    const classification = group?.portfolioClass ?? portfolio.classification;
     const configurationErrors: string[] = [];
+    if (portfolio.historical && !classification)
+      configurationErrors.push(
+        'Clasificación desconocida: resolvé la equivalencia',
+      );
+    if (
+      portfolio.historical &&
+      !group?.targetId &&
+      classification === 'ACTIVE' &&
+      !group?.assignedToId &&
+      !group?.allowDistribution
+    )
+      configurationErrors.push(
+        'Responsable actual sin resolver: asigná una cuenta o autorizá reparto',
+      );
     if (!row.sourceId || !sourceIds.has(row.sourceId))
       configurationErrors.push('Elegí el origen para este grupo');
     // Existing contacts keep their current owner; an unresolved historical advisor is provenance only.
-    if (!group?.targetId && !row.assignmentResolved)
+    if (
+      !group?.targetId &&
+      !row.assignmentResolved &&
+      (!portfolio.historical ||
+        (!!portfolio.currentResponsible &&
+          !group?.assignedToId &&
+          !group?.allowDistribution))
+    )
       configurationErrors.push(
         'Relacioná el asesor o elegí reparto automático',
       );
@@ -305,6 +364,9 @@ export function planLeadImport(
               : 'READY';
     return {
       ...row,
+      portfolioClass: classification,
+      consolidatedAssignedToId: group?.assignedToId ?? row.assignedToId,
+      allowDistribution: group?.allowDistribution ?? false,
       active,
       action,
       state,
@@ -373,8 +435,14 @@ export function planLeadImport(
       },
     };
   });
-  const pending = result.filter((row) => !row.leadId && row.active);
+  const pending = result.filter(
+    (row) => !row.leadId && row.active && !row.replay,
+  );
   const ready = pending.filter((row) => row.selected);
+  const skipped = result.filter((row) => !row.leadId && row.action === 'SKIP');
+  const alreadyRegistered = skipped.filter(
+    (row) => row.replay && row.active && row.decision !== 'OMIT',
+  ).length;
   return {
     rows: result,
     reviewToken: createHash('sha256')
@@ -383,6 +451,21 @@ export function planLeadImport(
       )
       .digest('hex'),
     summary: {
+      portfolio: Object.fromEntries(
+        ['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED'].map((value) => [
+          value,
+          ready.filter(
+            (row) => row.action === 'CREATE' && row.portfolioClass === value,
+          ).length,
+        ]),
+      ),
+      distribution: ready.filter(
+        (row) =>
+          row.action === 'CREATE' &&
+          row.allowDistribution &&
+          !row.consolidatedAssignedToId &&
+          row.portfolioClass === 'ACTIVE',
+      ).length,
       detected: rows.length,
       uniqueContacts: groups.size,
       creates: ready.filter((row) => row.action === 'CREATE').length,
@@ -400,8 +483,9 @@ export function planLeadImport(
         .length,
       contactErrors: pending.filter((row) => row.contactErrors.length).length,
       imported: rows.filter((row) => row.leadId).length,
-      omitted: result.filter((row) => !row.leadId && row.action === 'SKIP')
-        .length,
+      omitted: skipped.length,
+      alreadyRegistered,
+      userOmitted: skipped.length - alreadyRegistered,
       invalid: pending.filter((row) => row.action === 'REVIEW').length,
       pending: ready.length,
       merged: ready.filter((row) => row.action === 'MERGE').length,

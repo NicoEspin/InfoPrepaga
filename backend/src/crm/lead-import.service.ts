@@ -1,3 +1,9 @@
+import { createHash } from 'node:crypto';
+import { matchesImportSelection, importProblem } from './import-selection';
+import {
+  type ImportConfiguration,
+  portfolioMetadata,
+} from './import-portfolio';
 import { rememberImportMapping } from './import-mapping.store';
 import {
   canCleanOptionalContact,
@@ -18,13 +24,78 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CrmService } from './crm.service';
 import { contactKeys } from './contact-keys';
-import { parseLeadImport } from './lead-import.parser';
+import {
+  importContactErrors,
+  parseLeadImport,
+  sourceAppearanceFingerprint,
+  type ParsedImportRow,
+} from './lead-import.parser';
 import { ImportPatchDto, ImportRowPatchDto } from './lead-import.dto';
-import { planLeadImport, appearanceFingerprint } from './lead-import.plan';
+import {
+  planLeadImport,
+  appearanceFingerprint,
+  legacyAppearanceFingerprint,
+} from './lead-import.plan';
 import { resolveImportMappings } from './lead-import.mappings';
 import { importKey } from './import-normalization';
 import { PeriodicJobLog } from '../common/periodic-job-log';
 type Tx = Prisma.TransactionClient;
+type BatchCounts = {
+  total: number;
+  imported: number;
+  created: number;
+  updated: number;
+  merged: number;
+  omitted: number;
+  alreadyRegistered: number | null;
+};
+
+function importResult(batch: BatchCounts) {
+  const alreadyRegistered = batch.alreadyRegistered ?? 0;
+  return {
+    created: batch.created,
+    updated: batch.updated,
+    merged: batch.merged,
+    omitted: batch.omitted - alreadyRegistered,
+    alreadyRegistered,
+    pending: batch.total - batch.imported - batch.omitted,
+  };
+}
+
+function legacyImportKeys(row: ParsedImportRow) {
+  if (row.formulaFields.length) return [];
+  const keys = [legacyAppearanceFingerprint(row)];
+  // Older historical row editors sent AUTO even for a blank responsible.
+  // The only contact change recoverable from that variant is an optional invalid phone:
+  // originalPhone was retained verbatim and the old hash treated both values as null.
+  const metadata = row.metadata;
+  if (
+    metadata.intakeMode === 'HISTORICAL' &&
+    row.phone &&
+    metadata.originalPhone === row.phone &&
+    !contactKeys(row.email, row.phone).phoneKey &&
+    contactKeys(row.email, row.phone).emailKey &&
+    importContactErrors({ ...row, phone: '' }).length === 0
+  ) {
+    keys.push(
+      legacyAppearanceFingerprint({
+        ...row,
+        metadata: { ...metadata, allowDistribution: true },
+      }),
+    );
+  }
+  return keys;
+}
+function recoverLegacySource(row: LeadImportRow) {
+  if (row.sourceFingerprint || row.leadId || row.formulaFields.length)
+    return {};
+  const metadata = row.metadata as Prisma.JsonObject;
+  if (metadata.reviewDecisions || metadata.reviewedOriginal) return {};
+  return {
+    sourceFingerprint: sourceAppearanceFingerprint({ ...row, metadata }),
+    legacyFingerprints: [legacyAppearanceFingerprint(row)],
+  };
+}
 
 @Injectable()
 export class LeadImportService implements OnModuleInit, OnModuleDestroy {
@@ -61,7 +132,7 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       !(await this.db.leadImportBatch.count({
         where: {
           expiresAt: { lte: new Date() },
-          status: { in: ['REVIEW', 'IMPORTING', 'COMPLETE'] },
+          status: { in: ['REVIEW', 'IMPORTING', 'PARTIAL', 'COMPLETE'] },
         },
       }))
     )
@@ -70,7 +141,7 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       const expired = await tx.leadImportBatch.findMany({
         where: {
           expiresAt: { lte: new Date() },
-          status: { in: ['REVIEW', 'IMPORTING', 'COMPLETE'] },
+          status: { in: ['REVIEW', 'IMPORTING', 'PARTIAL', 'COMPLETE'] },
         },
         take: 100,
         select: { id: true },
@@ -85,6 +156,7 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           fileName: '',
           warnings: [],
           sheets: [],
+          configuration: Prisma.DbNull,
           version: { increment: 1 },
         },
       });
@@ -134,23 +206,58 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
   async upload(
     file: { originalname: string; buffer: Buffer } | undefined,
     actor: AuthenticatedUser,
+    mode: 'NEW' | 'HISTORICAL' = 'NEW',
+    configuration?: ImportConfiguration,
+    replacement?: { id: string; version: number },
   ) {
     assertAdmin(actor);
     if (!file || !/\.xlsx$/i.test(file.originalname))
       throw new BadRequestException('Seleccioná un archivo .xlsx');
-    const parsed = await parseLeadImport(file.buffer);
+    const parsed = await parseLeadImport(file.buffer, configuration, mode);
     await this.backfill();
     return this.crm.write(async (tx) => {
-      const batch = await tx.leadImportBatch.create({
-        data: {
-          ownerId: actor.id,
-          fileName: file.originalname.split(/[\\/]/).pop()!.slice(0, 255),
-          sheets: parsed.sheets,
-          warnings: parsed.warnings,
-          total: parsed.rows.length,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        },
-      });
+      let existing;
+      if (replacement) {
+        existing = await this.batch(tx, replacement.id, actor);
+        this.version(existing.version, replacement.version);
+        if (existing.imported || existing.status !== 'REVIEW')
+          throw new ConflictException('No se puede releer un lote ya iniciado');
+        await tx.leadImportRow.deleteMany({ where: { batchId: existing.id } });
+      }
+      const batchData = {
+        ownerId: actor.id,
+        mode,
+        ...(configuration && {
+          configuration,
+        }),
+        fileName: file.originalname.split(/[\\/]/).pop()!.slice(0, 255),
+        sheets: parsed.sheets,
+        warnings: parsed.warnings,
+        total: parsed.rows.length,
+        expiresAt: new Date(
+          Date.now() + (mode === 'HISTORICAL' ? 90 : 1) * 24 * 60 * 60 * 1000,
+        ),
+      };
+      const batch = existing
+        ? await tx.leadImportBatch.update({
+            where: { id: existing.id },
+            data: { ...batchData, version: { increment: 1 } },
+          })
+        : await tx.leadImportBatch.create({ data: batchData });
+      if (configuration) {
+        const fingerprint = createHash('sha256')
+          .update(JSON.stringify(configuration))
+          .digest('hex');
+        await tx.leadImportConfiguration.upsert({
+          where: { ownerId_fingerprint: { ownerId: actor.id, fingerprint } },
+          create: {
+            ownerId: actor.id,
+            fingerprint,
+            configuration,
+          },
+          update: {},
+        });
+      }
       const resolved = await this.resolveMappings(tx, parsed.rows);
       // Keep inserts bounded; all rows belong to this atomic preparation.
       for (let i = 0; i < parsed.rows.length; i += 100)
@@ -158,17 +265,37 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           data: resolved.slice(i, i + 100).map((row) => ({
             ...row,
             batchId: batch.id,
+            legacyFingerprints: legacyImportKeys(row),
             reviewedMatches: [],
           })),
         });
       const preview = await this.analyze(tx, batch);
       await this.acknowledge(tx, preview.rows);
+      if (preview.summary.alreadyRegistered === batch.total)
+        await tx.leadImportBatch.update({
+          where: { id: batch.id },
+          data: {
+            status: 'COMPLETE',
+            completedAt: new Date(),
+            omitted: batch.total,
+            alreadyRegistered: batch.total,
+          },
+        });
       return { id: batch.id };
+    });
+  }
+  async configurations(actor: AuthenticatedUser) {
+    assertAdmin(actor);
+    return this.db.leadImportConfiguration.findMany({
+      where: { ownerId: actor.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { id: true, configuration: true, createdAt: true },
     });
   }
   async list(actor: AuthenticatedUser) {
     assertAdmin(actor);
-    return this.db.leadImportBatch.findMany({
+    const batches = await this.db.leadImportBatch.findMany({
       where: {
         ownerId: actor.id,
         expiresAt: { gt: new Date() },
@@ -183,14 +310,60 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         imported: true,
         total: true,
         createdAt: true,
+        mode: true,
+        configuration: true,
+        expiresAt: true,
+        sheets: true,
+        created: true,
+        updated: true,
+        merged: true,
+        omitted: true,
+        alreadyRegistered: true,
       },
     });
+    return Promise.all(
+      batches.map(async ({ sheets, ...batch }) => {
+        if (
+          batch.alreadyRegistered === null &&
+          (batch.status === 'PARTIAL' ||
+            batch.status === 'IMPORTING' ||
+            batch.omitted)
+        ) {
+          // Older partial batches counted their unresolved rows as omitted.
+          const { summary } = await this.db.$transaction(
+            (tx) => this.analyze(tx, { id: batch.id, sheets }),
+            { isolationLevel: 'RepeatableRead', timeout: 15_000 },
+          );
+          return {
+            ...batch,
+            result: importResult({
+              ...batch,
+              omitted: summary.omitted,
+              alreadyRegistered: summary.alreadyRegistered,
+            }),
+          };
+        }
+        return { ...batch, result: importResult(batch) };
+      }),
+    );
+  }
+  private managementValue(row: LeadImportRow) {
+    const value = (row.metadata as Prisma.JsonObject).currentManagement;
+    return typeof value === 'string' ? value : '';
   }
   private async analyze(tx: Tx, batch: { id: string; sheets: string[] }) {
-    const rows = await tx.leadImportRow.findMany({
+    const storedRows = await tx.leadImportRow.findMany({
       where: { batchId: batch.id },
       orderBy: [{ sheet: 'asc' }, { rowNumber: 'asc' }],
     });
+    const rows = storedRows.map((row) => ({
+      ...row,
+      ...recoverLegacySource(row),
+    }));
+    const fingerprints = rows.map((row) => ({
+      current: appearanceFingerprint(row),
+      legacy: row.legacyFingerprints,
+    }));
     const keys = rows
       .filter((row) => batch.sheets.includes(row.sheet))
       .map((row) => contactKeys(row.email, row.phone));
@@ -238,10 +411,22 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         select: { id: true, firstName: true, lastName: true },
       }),
       tx.leadImportAppearance.findMany({
-        where: { fingerprint: { in: rows.map(appearanceFingerprint) } },
+        where: {
+          fingerprint: {
+            in: [
+              ...new Set(
+                fingerprints.flatMap(({ current, legacy }) => [
+                  current,
+                  ...legacy,
+                ]),
+              ),
+            ],
+          },
+        },
         select: { fingerprint: true },
       }),
     ]);
+    const stored = new Set(appearances.map((entry) => entry.fingerprint));
     const plan = planLeadImport(
       rows,
       batch.sheets,
@@ -256,7 +441,14 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       })),
       new Set(sources.map((source) => source.id)),
       new Set(sellers.map((seller) => seller.id)),
-      new Set(appearances.map((entry) => entry.fingerprint)),
+      new Set(
+        fingerprints
+          .filter(
+            ({ current, legacy }) =>
+              stored.has(current) || legacy.some((key) => stored.has(key)),
+          )
+          .map(({ current }) => current),
+      ),
       {
         sources: new Map(sources.map((source) => [source.id, source.name])),
         sellers: new Map(
@@ -267,10 +459,11 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         ),
       },
     );
-    const active = rows.filter(
-      (row) => batch.sheets.includes(row.sheet) && !row.leadId,
+    const active = plan.rows.filter(
+      (row) =>
+        row.active && !row.leadId && !row.replay && row.decision !== 'OMIT',
     );
-    const groups = new Map<string, LeadImportRow[]>();
+    const groups = new Map<string, typeof active>();
     const advisors = new Map<string, LeadImportRow[]>();
     for (const row of active) {
       const key = `${row.sheet}\u0000${row.group}`;
@@ -283,15 +476,62 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
     }
     return {
       ...plan,
-      availableSheets: [...new Set(rows.map((row) => row.sheet))],
-      groups: [...groups.values()].map((same) => ({
-        sheet: same[0].sheet,
-        group: same[0].group,
-        sourceId: same.every((row) => row.sourceId === same[0].sourceId)
-          ? same[0].sourceId
-          : null,
+      problems: Object.fromEntries(
+        ['CONFIGURATION', 'CONTACT', 'IDENTITY', 'OWNER', 'CLASSIFICATION'].map(
+          (problem) => [
+            problem,
+            plan.rows.filter(
+              (row) =>
+                row.active &&
+                !row.leadId &&
+                !row.replay &&
+                importProblem(row, problem),
+            ).length,
+          ],
+        ),
+      ),
+      managementValues: [
+        ...new Set(active.map((row) => this.managementValue(row))),
+      ].map((value) => ({
+        value,
+        count: active.filter((row) => this.managementValue(row) === value)
+          .length,
       })),
+      currentResponsibles: [
+        ...new Set(
+          active.map(
+            (row) => portfolioMetadata(row.metadata).currentResponsible,
+          ),
+        ),
+      ].map((alias) => ({
+        alias,
+        count: active.filter(
+          (row) => portfolioMetadata(row.metadata).currentResponsible === alias,
+        ).length,
+      })),
+      availableSheets: [...new Set(rows.map((row) => row.sheet))],
+      groups: [...groups.values()]
+        .map((same) => ({
+          sheet: same[0].sheet,
+          group: same[0].group,
+          count: same.length,
+          blocked: same.filter(
+            (row) =>
+              !row.sourceId ||
+              !sources.some((source) => source.id === row.sourceId),
+          ).length,
+          sourceId: same.every((row) => row.sourceId === same[0].sourceId)
+            ? same[0].sourceId
+            : null,
+        }))
+        .sort(
+          (a, b) =>
+            b.blocked - a.blocked ||
+            a.sheet.localeCompare(b.sheet) ||
+            a.group.localeCompare(b.group),
+        ),
       advisors: [...advisors.values()].map((same) => ({
+        count: same.length,
         advisor: same[0].advisor,
         variants: [...new Set(same.map((row) => row.advisor))],
         resolved: same.every((row) => row.assignmentResolved),
@@ -321,7 +561,6 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
     ]);
     return resolveImportMappings(rows, rules, sources, users);
   }
-
   private async acknowledge(
     tx: Tx,
     rows: Array<{
@@ -343,17 +582,29 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       FROM jsonb_to_recordset(${JSON.stringify(changes)}::jsonb) AS v(id text, matches jsonb)
       WHERE r.id = v.id`;
   }
-  async get(id: string, actor: AuthenticatedUser, page = 1, filter = 'ALL') {
+  async get(
+    id: string,
+    actor: AuthenticatedUser,
+    page = 1,
+    filter = 'ALL',
+    selection: import('./lead-import.dto').ImportSelectionDto = {},
+  ) {
     return this.db.$transaction(
       async (tx) => {
         const batch = await this.batch(tx, id, actor);
         const preview = await this.analyze(tx, batch);
         const filtered = preview.rows.filter(
           (row) =>
-            filter === 'ALL' ||
-            (filter === 'DUPLICATES' && row.duplicate) ||
-            (filter === 'REVIEW' && row.action === 'REVIEW') ||
-            filter === row.action,
+            matchesImportSelection(row, selection) &&
+            (filter === 'ALL' ||
+              (filter === 'DUPLICATES' && row.duplicate) ||
+              (filter === 'REVIEW' && row.action === 'REVIEW') ||
+              filter === row.action),
+        );
+        filtered.sort(
+          (a, b) =>
+            Number(b.portfolioClass === 'ACTIVE') -
+            Number(a.portfolioClass === 'ACTIVE'),
         );
         const items = filtered
           .slice((page - 1) * 50, page * 50)
@@ -361,21 +612,37 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
             ({
               reviewedMatches: _reviewed,
               externalMatches: _external,
+              sourceFingerprint: _sourceFingerprint,
+              legacyFingerprints: _legacyFingerprints,
               ...row
             }) => {
               void _reviewed;
               void _external;
+              void _sourceFingerprint;
+              void _legacyFingerprints;
               return row;
             },
           );
         return {
           ...batch,
           ...preview,
+          result: importResult(
+            batch.status === 'REVIEW' || batch.alreadyRegistered === null
+              ? {
+                  ...batch,
+                  omitted: preview.summary.omitted,
+                  alreadyRegistered: preview.summary.alreadyRegistered,
+                }
+              : batch,
+          ),
           rows: undefined,
           items,
           page,
           pageSize: 50,
           rowTotal: filtered.length,
+          selectableTotal: filtered.filter(
+            (row) => row.active && !row.leadId && !row.replay,
+          ).length,
         };
       },
       { isolationLevel: 'RepeatableRead', timeout: 15_000 },
@@ -385,18 +652,92 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
     return this.crm.write(async (tx) => {
       const batch = await this.batch(tx, id, actor);
       this.version(batch.version, dto.version);
-      if (dto.duplicates || dto.bulkCleanup)
+      if (dto.duplicates || dto.bulkCleanup || dto.bulk)
         this.checkReview(
           (await this.analyze(tx, batch)).reviewToken,
           dto.reviewToken,
         );
-      if (
-        batch.status === 'COMPLETE' ||
-        (batch.status === 'IMPORTING' && (dto.sheets || dto.mappings))
-      )
+      if (batch.status === 'COMPLETE' || (batch.imported > 0 && dto.sheets))
         throw new ConflictException(
           'La carga ya comenzó; solo podés revisar filas pendientes',
         );
+      if (dto.bulk) {
+        const preview = await this.analyze(tx, batch);
+        const { action, selection, expectedCount, assignedToId } = dto.bulk;
+        const matched = preview.rows.filter(
+          (row) =>
+            row.active &&
+            !row.leadId &&
+            !row.replay &&
+            matchesImportSelection(row, selection),
+        );
+        if (matched.length !== expectedCount)
+          throw new ConflictException(
+            'El alcance cambió. Revisá la cantidad antes de aplicar',
+          );
+        if (action === 'ASSIGN') {
+          if (!assignedToId)
+            throw new BadRequestException('Elegí un responsable actual');
+          await this.validateManualResponsible(tx, assignedToId);
+        }
+        for (const row of matched) {
+          const metadata = row.metadata as Prisma.InputJsonObject;
+          if (
+            ['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED', 'DISTRIBUTE'].includes(
+              action,
+            ) &&
+            batch.mode !== 'HISTORICAL'
+          )
+            throw new BadRequestException(
+              'La clasificación de migración requiere modalidad histórica',
+            );
+          await tx.leadImportRow.update({
+            where: { id: row.id },
+            data: {
+              sourceFingerprint: row.sourceFingerprint,
+              legacyFingerprints: row.legacyFingerprints,
+              ...(['OMIT', 'AUTO'].includes(action)
+                ? { decision: action }
+                : {}),
+              ...(action === 'ASSIGN'
+                ? { assignedToId, assignmentResolved: true }
+                : {}),
+              ...(action === 'DISTRIBUTE'
+                ? { assignedToId: null, assignmentResolved: true }
+                : {}),
+              formulaFields: row.formulaFields.filter(
+                (field) =>
+                  !(
+                    field === 'currentManagement' &&
+                    ['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED'].includes(action)
+                  ) &&
+                  !(
+                    field === 'currentResponsible' &&
+                    ['ASSIGN', 'DISTRIBUTE'].includes(action)
+                  ),
+              ),
+              metadata: {
+                ...metadata,
+                ...(['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED'].includes(action)
+                  ? { portfolioClass: action }
+                  : {}),
+                ...(action === 'DISTRIBUTE' ? { allowDistribution: true } : {}),
+                reviewDecisions: [
+                  ...(Array.isArray(metadata.reviewDecisions)
+                    ? (metadata.reviewDecisions as Prisma.InputJsonValue[])
+                    : []),
+                  {
+                    action,
+                    actorId: actor.id,
+                    at: new Date().toISOString(),
+                    assignedToId: assignedToId ?? null,
+                  },
+                ],
+              },
+            },
+          });
+        }
+      }
       if (dto.bulkCleanup) {
         const preview = await this.analyze(tx, batch);
         const kind = dto.bulkCleanup;
@@ -407,6 +748,8 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
             return {
               id: row.id,
               email: cleaned.email,
+              fingerprint: row.sourceFingerprint,
+              legacy: row.legacyFingerprints,
               phone: cleaned.phone,
               formulas: cleaned.formulaFields,
               metadata: cleaned.metadata,
@@ -416,9 +759,11 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           await tx.$executeRaw`
           UPDATE lead_import_rows AS r SET email=v.email, phone=v.phone,
             "formulaFields"=ARRAY(SELECT jsonb_array_elements_text(v.formulas)),
-            metadata=v.metadata, "reviewedMatches"=ARRAY[]::TEXT[]
+            metadata=v.metadata, "reviewedMatches"=ARRAY[]::TEXT[],
+            "sourceFingerprint"=v.fingerprint,
+            "legacyFingerprints"=ARRAY(SELECT jsonb_array_elements_text(v.legacy))
           FROM jsonb_to_recordset(${JSON.stringify(changes)}::jsonb)
-            AS v(id TEXT,email TEXT,phone TEXT,formulas JSONB,metadata JSONB)
+            AS v(id TEXT,email TEXT,phone TEXT,formulas JSONB,metadata JSONB,fingerprint TEXT,legacy JSONB)
           WHERE r.id=v.id AND r."batchId"=${id} AND r."leadId" IS NULL`;
       }
       if (dto.sheets) {
@@ -435,6 +780,18 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           throw new BadRequestException('Hoja no disponible en el archivo');
       }
       for (const mapping of dto.mappings ?? []) {
+        if (
+          batch.mode === 'HISTORICAL' &&
+          mapping.assignedToId !== undefined &&
+          !mapping.currentResponsible
+        )
+          throw new BadRequestException(
+            'El asesor histórico no determina la responsabilidad actual',
+          );
+        if (mapping.currentResponsible && mapping.assignedToId === null)
+          throw new BadRequestException(
+            'Autorizá el reparto con la acción explícita de cartera',
+          );
         if (!mapping.sheet && mapping.advisor === undefined)
           throw new BadRequestException('Indicá hoja o asesor para relacionar');
         if (
@@ -459,7 +816,13 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         });
         const matched = candidates.filter((row) =>
           mapping.advisor !== undefined
-            ? aliases.has(importKey(row.advisor))
+            ? aliases.has(
+                importKey(
+                  mapping.currentResponsible
+                    ? portfolioMetadata(row.metadata).currentResponsible
+                    : row.advisor,
+                ),
+              )
             : true,
         );
         if (mapping.sourceId !== undefined)
@@ -499,9 +862,13 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
               : []),
             ...(mapping.assignedToId !== undefined
               ? mapping.advisor !== undefined
-                ? [...aliases]
-                    .filter(Boolean)
-                    .map((key) => ({ kind: 'ADVISOR', scope: '*', key }))
+                ? [...aliases].filter(Boolean).map((key) => ({
+                    kind: mapping.currentResponsible
+                      ? 'CURRENT_RESPONSIBLE'
+                      : 'ADVISOR',
+                    scope: '*',
+                    key,
+                  }))
                 : mapping.sheet
                   ? [{ kind: 'DEFAULT', scope: mapping.sheet, key: '*' }]
                   : []
@@ -546,6 +913,7 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         where: {
           id,
           isActive: true,
+          deletedAt: null,
           roles: {
             some: { role: { name: { in: ['ADMIN', 'VENDEDOR'] } } },
           },
@@ -583,15 +951,26 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         reviewToken,
         acknowledgeDuplicates,
         assignedToId,
+        portfolioClass,
         excludePending: _excludePending,
         ...data
       } = dto;
       void _version;
       void _excludePending;
+      if (portfolioClass && batch.mode !== 'HISTORICAL')
+        throw new BadRequestException(
+          'La clasificación de migración requiere modalidad histórica',
+        );
       const contactChanged =
         (dto.email !== undefined &&
           dto.email.trim().toLowerCase() !== row.email) ||
         (dto.phone !== undefined && dto.phone.trim() !== row.phone);
+      const metadata = row.metadata as Prisma.InputJsonObject;
+      const previous = metadata.reviewedOriginal;
+      const reviewedOriginal =
+        previous && typeof previous === 'object' && !Array.isArray(previous)
+          ? (previous as Prisma.InputJsonObject)
+          : {};
       if (acknowledgeDuplicates)
         this.checkReview(
           (await this.analyze(tx, batch)).reviewToken,
@@ -601,10 +980,56 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         where: { id: rowId },
         data: {
           ...data,
+          ...recoverLegacySource(row),
+          metadata: {
+            ...metadata,
+            ...(contactChanged && {
+              reviewedOriginal: {
+                ...(dto.email !== undefined &&
+                  dto.email.trim().toLowerCase() !== row.email && {
+                    email: row.email,
+                  }),
+                ...(dto.phone !== undefined &&
+                  dto.phone.trim() !== row.phone && { phone: row.phone }),
+                ...reviewedOriginal,
+              },
+            }),
+            ...(portfolioClass ? { portfolioClass } : {}),
+            ...(batch.mode === 'HISTORICAL' && assignedToId !== undefined
+              ? { allowDistribution: assignedToId === null }
+              : {}),
+            reviewDecisions: [
+              ...(Array.isArray(
+                (row.metadata as Prisma.InputJsonObject).reviewDecisions,
+              )
+                ? ((row.metadata as Prisma.InputJsonObject)
+                    .reviewDecisions as Prisma.InputJsonValue[])
+                : []),
+              {
+                actorId: actor.id,
+                at: new Date().toISOString(),
+                before: {
+                  name: row.name,
+                  email: row.email,
+                  phone: row.phone,
+                  observations: row.observations,
+                  assignedToId: row.assignedToId,
+                },
+                changes: JSON.parse(
+                  JSON.stringify(dto),
+                ) as Prisma.InputJsonValue,
+              },
+            ],
+          },
           formulaFields: row.formulaFields.filter(
             (field) =>
-              dto[field as 'name' | 'email' | 'phone' | 'observations'] ===
-              undefined,
+              (field === 'currentManagement'
+                ? portfolioClass
+                : field === 'currentResponsible'
+                  ? assignedToId
+                  : dto[
+                      field as 'name' | 'email' | 'phone' | 'observations'
+                    ]) === undefined,
           ),
           ...(dto.name !== undefined && {
             name: dto.name.trim(),
@@ -670,7 +1095,15 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
   ) {
     return this.crm.write(async (tx) => {
       const batch = await this.batch(tx, id, actor);
-      if (batch.status === 'COMPLETE') return this.progress(batch);
+      if (batch.status === 'COMPLETE') {
+        if (batch.alreadyRegistered !== null) return this.progress(batch);
+        const { summary } = await this.analyze(tx, batch);
+        return this.progress({
+          ...batch,
+          omitted: summary.omitted,
+          alreadyRegistered: summary.alreadyRegistered,
+        });
+      }
       this.version(batch.version, version);
       let preview = await this.analyze(tx, batch);
       let excluded = 0;
@@ -685,13 +1118,9 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
         });
         preview = await this.analyze(tx, batch);
       }
-      if (preview.summary.requiresReview)
+      if (preview.summary.unreviewedReady)
         throw new ConflictException(
           'Aparecieron coincidencias nuevas. Revisalas y confirmá la revisión de duplicados',
-        );
-      if (preview.summary.invalid)
-        throw new BadRequestException(
-          'Corregí, omití o excluí explícitamente las excepciones pendientes',
         );
       const selected = preview.rows
         .filter((row) => row.selected)
@@ -730,7 +1159,16 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
             },
             actor,
             {
-              assignedToId: row.assignedToId,
+              assignedToId: row.consolidatedAssignedToId,
+              mode: batch.mode,
+              portfolioClass: row.portfolioClass ?? 'UNCLASSIFIED',
+              allowDistribution: row.allowDistribution,
+              originDate: portfolioMetadata(row.metadata).originDate
+                ? new Date(portfolioMetadata(row.metadata).originDate!)
+                : null,
+              declaredLastManagedAt: portfolioMetadata(row.metadata).lastManaged
+                ? new Date(portfolioMetadata(row.metadata).lastManaged!)
+                : null,
               metadata: {
                 ...(row.metadata as Prisma.InputJsonObject),
                 batchId: id,
@@ -823,41 +1261,42 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
           });
         await tx.leadImportRow.update({
           where: { id: row.id },
-          data: { leadId, outcome },
+          data: { leadId, outcome, sourceFingerprint: row.sourceFingerprint },
         });
       }
       const complete = selected.length <= 100;
       const updated = await tx.leadImportBatch.update({
         where: { id },
         data: {
-          status: complete ? 'COMPLETE' : 'IMPORTING',
+          status: complete
+            ? preview.summary.invalid
+              ? 'PARTIAL'
+              : 'COMPLETE'
+            : 'IMPORTING',
           version: { increment: 1 },
           imported: { increment: Math.min(100, selected.length) },
           created: { increment: created },
           updated: { increment: updatedTargets.size },
           merged: { increment: merged },
           excluded: { increment: excluded },
+          omitted: preview.summary.omitted,
+          alreadyRegistered: preview.summary.alreadyRegistered,
           ...(complete && {
             completedAt: new Date(),
-            omitted: preview.rows.filter((row) => !row.leadId && !row.selected)
-              .length,
           }),
         },
       });
       return this.progress(updated);
     });
   }
-  private progress(batch: {
-    id: string;
-    status: string;
-    version: number;
-    imported: number;
-    omitted: number;
-    created: number;
-    updated: number;
-    merged: number;
-    excluded: number;
-  }) {
+  private progress(
+    batch: BatchCounts & {
+      id: string;
+      status: string;
+      version: number;
+      excluded: number;
+    },
+  ) {
     return {
       id: batch.id,
       status: batch.status,
@@ -868,6 +1307,7 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
       updated: batch.updated,
       merged: batch.merged,
       excluded: batch.excluded,
+      result: importResult(batch),
     };
   }
 }

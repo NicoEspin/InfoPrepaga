@@ -30,6 +30,12 @@ const match = object(
   ['kind', 'name'],
 );
 const row = object({
+  portfolioClass: nullable({
+    type: 'string',
+    enum: ['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED'],
+  }),
+  allowDistribution: bool,
+  consolidatedAssignedToId: nullable(uuid),
   action: {
     type: 'string',
     enum: ['CREATE', 'UPDATE', 'MERGE', 'SKIP', 'REVIEW'],
@@ -96,6 +102,14 @@ const row = object({
   selected: bool,
   requiresReview: bool,
 });
+const result = object({
+  created: number,
+  updated: number,
+  merged: number,
+  omitted: number,
+  alreadyRegistered: number,
+  pending: number,
+});
 const schemas = {
   created: object({ id: uuid }),
   changed: object({ id: uuid, version: number }),
@@ -107,6 +121,7 @@ const schemas = {
       status: text,
       imported: number,
       total: number,
+      result,
       createdAt: { type: 'string', format: 'date-time' },
     }),
   ),
@@ -116,17 +131,28 @@ const schemas = {
     merged: number,
     excluded: number,
     id: uuid,
-    status: { type: 'string', enum: ['IMPORTING', 'COMPLETE'] },
+    status: { type: 'string', enum: ['IMPORTING', 'PARTIAL', 'COMPLETE'] },
     version: number,
     imported: number,
     omitted: number,
+    result,
   }),
   preview: object({
+    mode: { type: 'string', enum: ['NEW', 'HISTORICAL'] },
+    configuration: nullable({ type: 'object', additionalProperties: true }),
+    selectableTotal: number,
+    problems: { type: 'object', additionalProperties: { type: 'integer' } },
+    currentResponsibles: array(object({ alias: text, count: number })),
+    managementValues: array(object({ value: text, count: number })),
     id: uuid,
     fileName: text,
     version: number,
-    status: { type: 'string', enum: ['REVIEW', 'IMPORTING', 'COMPLETE'] },
+    status: {
+      type: 'string',
+      enum: ['REVIEW', 'IMPORTING', 'PARTIAL', 'COMPLETE'],
+    },
     expiresAt: { type: 'string', format: 'date-time' },
+    result,
     sheets: array(text),
     availableSheets: array(text),
     warnings: array(text),
@@ -136,7 +162,13 @@ const schemas = {
     pageSize: { type: 'integer', enum: [50] },
     rowTotal: number,
     groups: array(
-      object({ sheet: text, group: text, sourceId: nullable(uuid) }),
+      object({
+        count: number,
+        blocked: number,
+        sheet: text,
+        group: text,
+        sourceId: nullable(uuid),
+      }),
     ),
     advisors: array(
       object({
@@ -147,6 +179,12 @@ const schemas = {
       }),
     ),
     summary: object({
+      portfolio: object({
+        ACTIVE: number,
+        HISTORICAL: number,
+        UNCLASSIFIED: number,
+      }),
+      distribution: number,
       detected: number,
       uniqueContacts: number,
       creates: number,
@@ -158,6 +196,8 @@ const schemas = {
       merged: number,
       imported: number,
       omitted: number,
+      alreadyRegistered: number,
+      userOmitted: number,
       invalid: number,
       pending: number,
       duplicates: number,

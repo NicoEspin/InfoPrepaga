@@ -28,12 +28,28 @@ export const getImport = (
   id: string,
   page: number,
   signal?: AbortSignal,
-  filter: ImportFilter = 'ALL'
-) => crmRequest<ImportPreview>(`lead-imports/${id}?page=${page}&filter=${filter}`, { signal });
-export function uploadImport(file: File) {
+  filter: ImportFilter = 'ALL',
+  selection: import('./types').ImportSelection = {}
+) =>
+  crmRequest<ImportPreview>(
+    `lead-imports/${id}?page=${page}&filter=${filter}&${new URLSearchParams(Object.entries(selection).filter(([, v]) => typeof v === 'string') as [string, string][])}`,
+    { signal }
+  );
+export function uploadImport(
+  file: File,
+  mode = 'NEW',
+  configuration?: import('./types').ImportConfiguration,
+  replacement?: { id: string; version: number }
+) {
   const body = new FormData();
   body.set('file', file);
-  return crmRequest<{ id: string }>('lead-imports', { method: 'POST', body });
+  body.set('mode', mode);
+  if (configuration) body.set('configuration', JSON.stringify(configuration));
+  if (replacement) body.set('version', String(replacement.version));
+  return crmRequest<{ id: string }>(
+    replacement ? `lead-imports/${replacement.id}/reconfigure` : 'lead-imports',
+    { method: 'POST', body }
+  );
 }
 export const changeImport = (
   id: string,

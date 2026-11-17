@@ -25,13 +25,14 @@ export type Seller = Person & {
   roles: { role: { name: string } }[];
 };
 export type Lead = {
+  portfolioClass?: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED';
+  intakeMode?: 'NEW' | 'HISTORICAL';
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
   company: string | null;
   observations: string;
-  importData?: Record<string, string | number> | null;
   status: string;
   sourceId: string;
   source: Source;
@@ -179,10 +180,6 @@ export const profileSchema = z.object({
   phone: z.string().nullable(),
   company: z.string().nullable(),
   observations: z.string(),
-  importData: z
-    .record(z.string(), z.union([z.string(), z.number()]))
-    .nullable()
-    .optional(),
   status: z.enum([
     'NEW',
     'NO_ANSWER',

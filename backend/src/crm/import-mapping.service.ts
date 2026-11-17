@@ -76,6 +76,14 @@ export class ImportMappingService {
     remove = false,
   ) {
     assertAdmin(actor);
+    if (
+      dto.kind === 'CURRENT_RESPONSIBLE' &&
+      'assignedToId' in dto &&
+      dto.assignedToId === null
+    )
+      throw new BadRequestException(
+        'El responsable actual requiere una cuenta; el reparto se autoriza por lote',
+      );
     return this.crm.write(async (tx) => {
       const identity = { kind: dto.kind, scope: dto.scope, key: dto.key };
       const before = await tx.leadImportMapping.findUnique({
@@ -104,9 +112,10 @@ export class ImportMappingService {
         update.newKey === undefined ? before.key : importKey(update.newKey);
       if (
         !key ||
-        (before.kind === 'ADVISOR' && (key === '*' || key.length > 160)) ||
+        (['ADVISOR', 'CURRENT_RESPONSIBLE'].includes(before.kind) &&
+          (key === '*' || key.length > 160)) ||
         (before.kind === 'DEFAULT' && key !== '*') ||
-        (before.kind === 'ADVISOR'
+        (['ADVISOR', 'CURRENT_RESPONSIBLE'].includes(before.kind)
           ? before.scope !== '*'
           : !IMPORT_SHEETS.includes(before.scope))
       )

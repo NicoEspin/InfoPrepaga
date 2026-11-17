@@ -12,6 +12,7 @@ const routes: Record<string, RegExp[]> = {
     /^users$/,
     /^leads$/,
     /^lead-imports$/,
+    /^lead-imports\/configurations$/,
     /^import-mappings$/,
     new RegExp(`^lead-imports/${uuid}$`),
     new RegExp(`^leads/${uuid}$`),
@@ -23,7 +24,7 @@ const routes: Record<string, RegExp[]> = {
   POST: [
     /^reports(?:\/preview)?$/,
     /^lead-imports$/,
-    new RegExp(`^lead-imports/${uuid}/(?:review|confirm)$`),
+    new RegExp(`^lead-imports/${uuid}/(?:review|confirm|reconfigure)$`),
     /^leads$/,
     /^sources$/,
     /^tasks$/,
@@ -32,6 +33,7 @@ const routes: Record<string, RegExp[]> = {
     new RegExp(`^leads/${uuid}/attachments$`)
   ],
   PATCH: [
+    /^leads\/portfolio$/,
     /^import-mappings$/,
     new RegExp(`^pipeline/${uuid}$`),
     new RegExp(`^lead-imports/${uuid}(?:/rows/${uuid})?$`),
@@ -65,14 +67,18 @@ export async function handle(
     let body: string | ArrayBuffer | undefined;
     const upload =
       request.method === 'POST' &&
-      (endpoint.endsWith('/attachments') || endpoint === 'lead-imports');
+      (endpoint.endsWith('/attachments') ||
+        endpoint === 'lead-imports' ||
+        /^lead-imports\/[0-9a-fA-F-]{36}\/reconfigure$/.test(endpoint));
     // A report can contain 500 sources, people and investments. Keep the
     // larger JSON allowance scoped to its two validated write endpoints.
     const bodyLimit = upload
-      ? 10 * 1024 * 1024 + 8192
+      ? 10 * 1024 * 1024 + 32768
       : endpoint === 'reports' || endpoint === 'reports/preview'
         ? 128 * 1024
-        : 16_384;
+        : endpoint.startsWith('lead-imports/')
+          ? 256 * 1024
+          : 16_384;
     const contentType = request.headers.get('content-type') ?? '';
     if (
       request.method !== 'GET' &&

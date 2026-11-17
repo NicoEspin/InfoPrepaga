@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsDefined,
   IsBoolean,
   IsIn,
   IsInt,
@@ -34,6 +35,11 @@ export class ImportVersionDto {
   excludePending?: boolean;
 }
 export class ImportMappingDto {
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsBoolean()
+  currentResponsible?: boolean;
+
   @ApiPropertyOptional()
   @ValidateIf((_o, v: unknown) => v !== undefined)
   @IsBoolean()
@@ -71,7 +77,78 @@ export class ImportMappingDto {
   @IsUUID()
   assignedToId?: string | null;
 }
+export class ImportSelectionDto {
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsIn(['ALL', 'REVIEW', 'CREATE', 'UPDATE', 'MERGE', 'SKIP', 'DUPLICATES'])
+  actionFilter?: string;
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsArray()
+  @ArrayMaxSize(5000)
+  @IsUUID('4', { each: true })
+  ids?: string[];
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsIn(IMPORT_SHEETS)
+  sheet?: string;
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsIn(['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED', 'UNKNOWN'])
+  portfolioClass?: string;
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsIn([
+    'ALL',
+    'REVIEW',
+    'CONFIGURATION',
+    'CONTACT',
+    'IDENTITY',
+    'OWNER',
+    'CLASSIFICATION',
+  ])
+  problem?: string;
+}
+export class ImportBulkDto {
+  @ApiProperty()
+  @ValidateNested()
+  @Type(() => ImportSelectionDto)
+  @IsDefined()
+  selection!: ImportSelectionDto;
+  @ApiProperty()
+  @IsIn([
+    'ACTIVE',
+    'HISTORICAL',
+    'UNCLASSIFIED',
+    'OMIT',
+    'AUTO',
+    'ASSIGN',
+    'DISTRIBUTE',
+  ])
+  action!:
+    | 'ACTIVE'
+    | 'HISTORICAL'
+    | 'UNCLASSIFIED'
+    | 'OMIT'
+    | 'AUTO'
+    | 'ASSIGN'
+    | 'DISTRIBUTE';
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsUUID()
+  assignedToId?: string;
+  @ApiProperty()
+  @IsInt()
+  @Min(0)
+  expectedCount!: number;
+}
 export class ImportPatchDto extends ImportVersionDto {
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @ValidateNested()
+  @Type(() => ImportBulkDto)
+  bulk?: ImportBulkDto;
+
   @ApiPropertyOptional({
     enum: ['INVALID_EMAIL', 'INVALID_PHONE', 'FORMULA_PHONE'],
     description:
@@ -100,6 +177,11 @@ export class ImportPatchDto extends ImportVersionDto {
   duplicates?: 'INCLUDE' | 'OMIT' | 'AUTO';
 }
 export class ImportRowPatchDto extends ImportVersionDto {
+  @ApiPropertyOptional()
+  @ValidateIf((_o, v: unknown) => v !== undefined)
+  @IsIn(['ACTIVE', 'HISTORICAL', 'UNCLASSIFIED'])
+  portfolioClass?: 'ACTIVE' | 'HISTORICAL' | 'UNCLASSIFIED';
+
   @ApiPropertyOptional()
   @ValidateIf((_o, v: unknown) => v !== undefined)
   @IsString()

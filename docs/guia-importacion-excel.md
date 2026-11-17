@@ -1,6 +1,8 @@
+> Contrato actualizado: [migración histórica y cartera](historical-portfolio.md). Sus reglas de modalidades, retención, confirmación parcial y cálculo versión 2 reemplazan las descripciones anteriores que difieran.
+
 # Guía de importación inteligente de Excel a InfoPrepaga CRM
 
-**Referencia:** `datos FACE.xlsx` · **Revisión:** 6 de noviembre de 2026.
+**Referencia:** `datos FACE.xlsx` · **Revisión:** 17 de noviembre de 2026.
 
 El importador reconoce las tablas históricas del libro, normaliza contactos, reutiliza equivalencias confirmadas y consolida repeticiones compatibles. La intervención del administrador se concentra en equivalencias desconocidas, contactos incompletos y conflictos de identidad. Subir el archivo prepara la revisión; los cambios comerciales se ejecutan después de confirmar.
 
@@ -15,14 +17,14 @@ Esta etapa requiere revisar la migración de auditoría antes de usarla en el en
 
 ## 1. Cómo usarlo
 
-1. Entrá como **ADMIN** a **Leads → Importar Excel** y elegí **Subir y revisar**.
+1. Entrá como **ADMIN** a **Leads → Importar Excel**, seleccioná la modalidad y el archivo, y elegí **Analizar archivo**. Podés retomar un lote desde **Importaciones recientes**.
 2. Revisá el resumen de filas detectadas, contactos estimados, altas nuevas, existentes actualizables, coincidencias internas, omisiones, configuración y errores de contacto.
-3. Abrí **Configuración de orígenes, vendedores y reglas de asignación**. Las correspondencias conocidas ya están resueltas; elegí una sola vez el destino de cada grupo desconocido.
-4. Relacioná cada asesor desconocido con una cuenta activa. Podés escribir otros alias separados por coma antes de elegir el vendedor: por ejemplo, confirmar juntos Fede y Federico. La casilla **Recordar equivalencias para próximas importaciones** guarda la decisión para futuros archivos. Las diferencias Fede/FEDE se agrupan sin repetir la configuración.
-5. Si una hoja tiene filas sin asesor, podés elegir un responsable predeterminado. Ese valor no reemplaza un asesor histórico informado. También podés confirmar reparto automático según las reglas del CRM.
-6. La tabla abre en **Necesitan revisión**. Usá **Revisar fila** para corregir o inspeccionar datos históricos; **Omitir** excluye una aparición sin borrar contactos existentes.
-7. Si querés avanzar con lo validado, marcá explícitamente **Excluir las excepciones pendientes e importar el resto**. Sin esa decisión, hay que resolver u omitir las filas pendientes.
-8. Elegí **Confirmar carga**, revisá el resumen definitivo y presioná **Confirmar y procesar**. Se procesan bloques de hasta 100 apariciones.
+3. En **Equivalencias de origen y responsables**, elegí una base activa para cada origen pendiente. Los grupos se ordenan por número de apariciones bloqueadas. Si querés reutilizar la próxima equivalencia en otros archivos, marcá **Recordar la próxima equivalencia como regla global** antes de elegirla; la casilla vuelve a quedar desmarcada después de aplicar la decisión.
+4. En **Migración de histórico**, el asesor histórico se conserva como procedencia. El responsable actual se resuelve por separado si está declarado. Un alta **En gestión** necesita responsable actual o autorización explícita de reparto. Una fila sin marca puede quedar **Pendiente de clasificación**. **Histórico** y **Pendiente de clasificación** quedan fuera del reparto.
+5. En **Carga de leads nuevos**, relacioná los alias de asesores con una cuenta activa o elegí reparto automático. Si una hoja tiene filas sin asesor, podés indicar un responsable predeterminado. El valor predeterminado no reemplaza un asesor informado.
+6. Elegí **Continuar a revisión**. La tabla abre en **Necesitan revisión**. Usá **Revisar fila** para corregir o inspeccionar datos históricos; **Omitir** excluye una aparición sin borrar contactos existentes.
+7. Elegí **Ver resumen** y comprobá las altas, actualizaciones y consolidaciones previstas. Ahí se distinguen las filas ya registradas y las exclusiones. Si quedan filas para revisar, podés conservarlas en el lote o excluirlas explícitamente.
+8. Elegí **Importar registros → Confirmar y procesar**. Se procesan bloques de hasta 100 apariciones. El **Resultado acumulado del lote** y **Importaciones recientes** muestran los totales. Desde el resultado podés **Ver leads del lote**, con todas las clasificaciones, o **Retomar revisión** si quedó pendiente. Si todas las filas ya estaban registradas, podés cerrar al ver el resultado.
 
 Los filtros son **Todos**, **Listos para crear**, **Listos para actualizar**, **Apariciones para consolidar**, **Duplicados**, **Necesitan revisión** y **Omitidos**. Cada página contiene hasta 50 filas. Una fila bloqueada aparece como **Requiere configuración** o **Requiere corrección**, nunca como lista para cargar.
 
@@ -42,7 +44,7 @@ En **DATOS LAN**, una única columna con nombre identifica también su canal: B 
 
 En **PIPA**, las etiquetas LAN, ref e ip lan se consideran clasificaciones históricas de origen, no vendedores. El texto original queda conservado. El nombre de la hoja **Fede** tampoco prueba que todos sus contactos pertenezcan a ese vendedor.
 
-**Pagos** y **Analisis** quedan fuera. También se ignoran títulos mensuales, encabezados reconocidos, resúmenes sin contacto y bloques laterales administrativos. La inversión en F de DATOS FACE no se importa.
+**Pagos** y **Analisis** quedan fuera. También se ignoran títulos mensuales, encabezados reconocidos, resúmenes sin contacto y bloques laterales administrativos. Para las columnas con contenido fuera de la tabla principal, el aviso muestra la hoja, el rango y cuántas filas tienen ese contenido. La inversión en F de DATOS FACE no se importa.
 
 ## 3. Cómo resuelve orígenes y asesores
 
@@ -50,7 +52,7 @@ Los orígenes históricos se relacionan con bases activas del CRM. Si hay una so
 
 Las equivalencias confirmadas se recuerdan por hoja/grupo para orígenes y por alias para asesores. Solo se usan destinos vigentes. Los apodos no se asignan por parecido: Fede y Federico necesitan una confirmación que los relacione. Una coincidencia inequívoca con el nombre completo configurado sí puede resolverse automáticamente.
 
-Un asesor histórico desconocido queda pendiente de configuración. Elegir reparto automático es una decisión explícita; no se usa como reemplazo silencioso de ese asesor. Los contactos existentes conservan su vendedor actual. Las filas sin asesor pueden usar el responsable predeterminado de su hoja o el reparto global.
+En una migración, un asesor histórico desconocido no bloquea por sí solo. Si hay un responsable actual declarado sin resolver, relacioná ese dato con una cuenta activa o revisá la fila. Los contactos existentes conservan su vendedor actual. En carga nueva, las filas sin asesor pueden usar el responsable predeterminado de su hoja o el reparto global.
 
 El reparto global rota entre vendedores activos con recepción habilitada, respetando turnos y pendientes anteriores. Si no hay candidatos, un lead nuevo puede quedar sin asignar y visible solo para ADMIN hasta poder repartirlo.
 
@@ -63,7 +65,8 @@ El reparto global rota entre vendedores activos con recepción habilitada, respe
 | Listo para consolidar | Se conserva otra aparición compatible sin crear un lead adicional. |
 | Requiere configuración | Falta una equivalencia global o un destino dejó de estar disponible. |
 | Requiere corrección | Hay un dato inválido o una coincidencia incompatible. |
-| Omitido / ya importado | No se cambia el contacto. |
+| Ya registrada | El CRM reconoce una procedencia existente, aun si se corrigió durante la revisión. |
+| Excluida | La decisión del administrador deja la fila o la hoja fuera de este lote. |
 
 La coincidencia se busca por teléfono normalizado o correo, **nunca solo por nombre**. Nombres diferentes para un mismo teléfono, correos/teléfonos incompatibles, varios contactos existentes posibles o responsables confirmados contradictorios para un alta nueva requieren revisión. El número de contactos únicos es una estimación por claves; un conflicto no confirma que dos personas sean la misma.
 
@@ -122,9 +125,9 @@ Las acciones masivas conservan los datos descartados para consultarlos en el per
 
 ## 7. Pausar, reanudar y recuperar
 
-El archivo debe ser `.xlsx` de hasta 10 MB y 5.000 candidatas. La revisión vence a las 24 horas de la subida, aun con carga parcial. Los bloques anteriores persisten al pausar o interrumpirse la conexión.
+El archivo debe ser `.xlsx` de hasta 10 MB y 5.000 **filas candidatas**. Desde que se prepara el archivo, la revisión dura **24 horas** en cargas nuevas y **90 días** en migraciones históricas. El vencimiento también aplica a las cargas parciales. Los bloques anteriores persisten al pausar o interrumpirse la conexión.
 
-**Pausar después del bloque actual** detiene nuevas solicitudes. Cerrar el navegador también deja de pedir bloques; el que está en curso puede finalizar. Al regresar, usá **Revisiones y cargas recientes**, actualizá y elegí **Reanudar carga**. No vuelvas a enviar una versión vieja tras una respuesta incierta.
+**Pausar después del bloque actual** detiene nuevas solicitudes. Cerrar el navegador también deja de pedir bloques; el que está en curso puede finalizar. Al regresar, abrí el lote en **Importaciones recientes** y elegí **Reanudar importación** o **Retomar revisión**, según su estado. No vuelvas a enviar una versión vieja tras una respuesta incierta.
 
 Después de comenzar, hojas y mapeos globales quedan fijos; se pueden revisar filas pendientes. Al vencer, hay que subir el archivo nuevamente. Las apariciones ya registradas se reconocen, y los contactos e historial permanecen. No hay un botón para deshacer indiscriminadamente todos los cambios del lote.
 

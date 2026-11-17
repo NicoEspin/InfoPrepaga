@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/ui/loading-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -112,7 +113,7 @@ export function CommercialProfileModal({
         aria-busy={profile.isFetching || action.pending}
       >
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className='pr-6 break-words'>
             {profile.isError ? 'Perfil no disponible' : (lead?.name ?? 'Perfil del lead')}
           </DialogTitle>
           <DialogDescription>Datos comerciales e historial de seguimiento.</DialogDescription>
@@ -128,12 +129,12 @@ export function CommercialProfileModal({
         {profile.isPending && !identity.error && <LoadingState label='Cargando perfil…' rows={4} />}
         {!profile.isError && lead && actor && (
           <>
-            <div className='lead-profile-summary'>
-              <div>
-                <strong>
+            <div className='bg-card grid min-w-0 gap-3 rounded-lg border p-4 md:flex md:items-start md:justify-between'>
+              <div className='text-muted-foreground min-w-0 space-y-1 text-sm break-words'>
+                <Badge variant='secondary' className='mb-1'>
                   {catalogs.data?.statuses.find((status) => status.id === lead.status)?.name ??
                     lead.status}
-                </strong>
+                </Badge>
                 <p>
                   {lead.email || 'Sin correo'} · {lead.phone || 'Sin teléfono'}
                 </p>
@@ -164,9 +165,7 @@ export function CommercialProfileModal({
                 />
               </div>
             </div>
-            <ImportAppearances key={leadId} actorId={actor.id} leadId={leadId} />
-            <Attachments leadId={leadId} actorId={actor.id} />
-            <div className='grid gap-4 md:grid-cols-2'>
+            <div className='grid min-w-0 gap-4 md:grid-cols-2'>
               <Card>
                 <CardHeader>
                   <CardTitle>Estado y responsable</CardTitle>
@@ -369,7 +368,10 @@ export function CommercialProfileModal({
                         )}
                         <ol className='grid gap-3'>
                           {history.data?.items.map((item) => (
-                            <li key={item.id}>
+                            <li
+                              key={item.id}
+                              className='space-y-1 border-b pb-3 text-sm break-words last:border-b-0'
+                            >
                               <strong>{titles[item.kind] ?? item.kind}</strong>
                               <p>
                                 {format.format(new Date(item.createdAt))} ·{' '}
@@ -432,6 +434,8 @@ export function CommercialProfileModal({
               </Card>
             </div>
             <Feedback error={action.error} message={action.message} pending={action.pending} />
+            <ImportAppearances key={leadId} actorId={actor.id} leadId={leadId} />
+            <Attachments leadId={leadId} actorId={actor.id} />
             {editor === 'lead' && catalogs.data && (
               <LeadForm
                 lead={lead}

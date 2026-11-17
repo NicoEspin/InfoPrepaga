@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-export const calculationVersion = 1;
+import { buenosAiresMidnight } from '../common/buenos-aires-calendar';
+export const calculationVersion = 2;
 export const stages = [
   'NEW',
   'CONTACTED',
@@ -18,17 +19,6 @@ export const stageNames: Record<string, string> = {
   UNKNOWN: 'Sin historial de etapa',
 };
 export function period(from: string, to: string, now: Date) {
-  const timezone = 'America/Argentina/Buenos_Aires';
-  const calendar = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const zone = new Intl.DateTimeFormat('en', {
-    timeZone: timezone,
-    timeZoneName: 'longOffset',
-  });
   function date(value: string) {
     const d = new Date(`${value}T00:00:00Z`);
     if (
@@ -39,43 +29,8 @@ export function period(from: string, to: string, now: Date) {
       throw new BadRequestException('Fecha de calendario inválida');
     return d;
   }
-  function midnight(d: Date) {
-    const wanted = d.toISOString().slice(0, 10);
-    // Observe both sides of a possible offset transition. At a skipped midnight,
-    // the first instant of that calendar date is 01:00; at a repeated one use the first.
-    const offsets = new Set(
-      [-86400000, 43200000, 129600000].map((delta) => {
-        const text = zone
-          .formatToParts(new Date(d.getTime() + delta))
-          .find((p) => p.type === 'timeZoneName')!.value;
-        if (text === 'GMT') return 0;
-        const match = /^GMT([+-])(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(text);
-        if (!match) throw new Error('Unsupported IANA timezone offset');
-        return (
-          (match[1] === '+' ? 1 : -1) *
-          (Number(match[2]) * 3600 +
-            Number(match[3]) * 60 +
-            Number(match[4] ?? 0)) *
-          1000
-        );
-      }),
-    );
-    const candidates = [...offsets]
-      .map((offset) => new Date(d.getTime() - offset))
-      .filter((candidate) => {
-        const parts = calendar.formatToParts(candidate);
-        return (
-          ['year', 'month', 'day']
-            .map((type) => parts.find((p) => p.type === type)!.value)
-            .join('-') === wanted
-        );
-      });
-    if (!candidates.length)
-      throw new BadRequestException('Fecha local inválida');
-    return new Date(Math.min(...candidates.map((d) => d.getTime())));
-  }
-  const start = midnight(date(from)),
-    end = midnight(new Date(date(to).getTime() + 86400000));
+  const start = buenosAiresMidnight(date(from)),
+    end = buenosAiresMidnight(new Date(date(to).getTime() + 86400000));
   if (start >= end || start > now)
     throw new BadRequestException('Período inválido o completamente futuro');
   return {

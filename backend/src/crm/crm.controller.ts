@@ -15,6 +15,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CrmService } from './crm.service';
 import {
   AssignmentDto,
+  PortfolioBulkDto,
   CreateLeadDto,
   CreateTaskDto,
   EditLeadDto,
@@ -96,6 +97,15 @@ export class CrmController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.crm.createLead(dto, actor);
+  }
+
+  @Patch('leads/portfolio')
+  @Roles('ADMIN')
+  portfolio(
+    @Body() dto: PortfolioBulkDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.crm.classifyPortfolio(dto, actor);
   }
 
   @Get('leads/:id')
