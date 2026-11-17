@@ -158,6 +158,7 @@ Required security design:
 
 ## 7. Frontend and design rules
 
+- For CRM interface changes, read [frontend/DESIGN.md](frontend/DESIGN.md) before editing and use its review checklist on the affected screens.
 - Follow the approved InfoPrepaga visual references: light workspace, dark left navigation, green accents, clear tables/cards, legible status badges, and responsive behavior.
 - Keep reusable shadcn components and design tokens centralized; avoid ad hoc styling for each screen.
 - Provide useful loading, empty, validation, error, and success states. Use accessible labels, focus states, keyboard navigation, and consistent Spanish (Argentina) UI copy.
