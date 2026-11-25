@@ -55,3 +55,7 @@ El perfil real valida la respuesta y su ID, cancela al cerrar/cambiar y no conse
 | Documentación | Contrastar contratos y resultados ejecutados | Los tres documentos de esta entrega y enlaces del README. |
 
 No se crearon commits ni se mezcló el trabajo previo del propietario en uno nuevo. La autorización por registro, reparto concurrente, persistencia y estados de interfaz son criterios de aceptación, no deuda posponible. Consultar [contratos y verificaciones](backend-api.md) y [deuda y etapas futuras](technical-debt.md).
+
+## Captación de sistema por YCloud
+
+La excepción interna de alta automática se documenta en [YCloud](ycloud-integration.md): solo mensajes de usuario atribuibles a anuncios y firmados por el endpoint configurado. El alta humana sigue exigiendo ADMIN. CrmService comparte la inserción/reparto sin representar al sistema como usuario privilegiado. El backfill de claves de contacto se comparte con Excel; mantiene su bloqueo y lotes anteriores. Bandeja, efectos comerciales y reintentos usan PostgreSQL. No se agregan servicios externos, respuestas automáticas ni acceso a Avalian.

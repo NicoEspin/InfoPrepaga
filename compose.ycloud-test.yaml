@@ -1,0 +1,20 @@
+# Explicit local test override; never load this file in production.
+# Use a separate project (-p infoprepaga-ycloud-test) and .env.ycloud-test.
+name: infoprepaga-ycloud-test
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: starter_test
+    ports:
+      - '127.0.0.1:5434:5432'
+  migrate:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/starter_test?schema=public
+  api:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/starter_test?schema=public
+      YCLOUD_ALLOW_NON_AD_TEST_MESSAGES: ${YCLOUD_ALLOW_NON_AD_TEST_MESSAGES:-false}
+      YCLOUD_TEST_SENDERS: ${YCLOUD_TEST_SENDERS:-}
+  web:
+    ports: !override
+      - '127.0.0.1:3340:3000'

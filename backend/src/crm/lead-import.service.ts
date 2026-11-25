@@ -183,23 +183,9 @@ export class LeadImportService implements OnModuleInit, OnModuleDestroy {
   private async backfill() {
     // Same lock as edits: never overwrite keys computed by a concurrent edit.
     for (;;) {
-      const count = await this.crm.write(async (tx) => {
-        const leads = await tx.lead.findMany({
-          where: { contactKeysVersion: 0 },
-          take: 100,
-          orderBy: { id: 'asc' },
-          select: { id: true, email: true, phone: true },
-        });
-        for (const lead of leads)
-          await tx.lead.update({
-            where: { id: lead.id },
-            data: {
-              ...contactKeys(lead.email, lead.phone),
-              contactKeysVersion: 1,
-            },
-          });
-        return leads.length;
-      });
+      const count = await this.crm.write((tx) =>
+        this.crm.backfillContactKeysInTransaction(tx),
+      );
       if (count < 100) break;
     }
   }

@@ -4,6 +4,7 @@ import { backendFetch } from '@/lib/backend';
 const uuid = '[0-9a-fA-F-]{36}';
 const routes: Record<string, RegExp[]> = {
   GET: [
+    /^integrations\/ycloud\/events(?:\/[A-Za-z0-9_-]{1,160})?$/,
     /^session$/,
     /^pipeline$/,
     /^reports(?:\/catalogs)?$/,
@@ -22,6 +23,7 @@ const routes: Record<string, RegExp[]> = {
     /^tasks$/
   ],
   POST: [
+    /^integrations\/ycloud\/events\/[A-Za-z0-9_-]{1,160}\/retry$/,
     /^reports(?:\/preview)?$/,
     /^lead-imports$/,
     new RegExp(`^lead-imports/${uuid}/(?:review|confirm|reconfigure)$`),

@@ -17,6 +17,7 @@ import { RolesModule } from './roles/roles.module';
 import { UsersModule } from './users/users.module';
 import { ReportsModule } from './reports/reports.module';
 import { CrmModule } from './crm/crm.module';
+import { YCloudModule } from './integrations/ycloud/ycloud.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { CrmModule } from './crm/crm.module';
     AuthModule,
     UsersModule,
     CrmModule,
+    YCloudModule,
     ReportsModule,
     RolesModule,
     PermissionsModule,

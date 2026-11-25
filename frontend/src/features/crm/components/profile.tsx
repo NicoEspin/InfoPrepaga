@@ -47,6 +47,7 @@ const format = new Intl.DateTimeFormat('es-AR', {
 });
 const titles: Record<string, string> = {
   registered: 'Lead creado',
+  'ycloud-inbound': 'Ingreso por WhatsApp · YCloud',
   imported: 'Importación Excel',
   imported_history: 'Historia incorporada desde Excel',
   assigned: 'Asignación',
@@ -379,6 +380,27 @@ export function CommercialProfileModal({
                                   ? 'Sistema'
                                   : personName(item.actor)}
                               </p>
+                              {item.kind === 'ycloud-inbound' && (
+                                <div>
+                                  <p>
+                                    {item.detail.isTestMessage === true
+                                      ? 'Prueba YCloud · mensaje sin anuncio'
+                                      : item.detail.linked
+                                        ? 'Nuevo ingreso vinculado al contacto existente.'
+                                        : 'Contacto creado desde un anuncio de Meta.'}
+                                  </p>
+                                  {typeof item.detail.adId === 'string' && (
+                                    <p>Anuncio: {item.detail.adId}</p>
+                                  )}
+                                  {typeof item.detail.messageAt === 'string' && (
+                                    <p>
+                                      Mensaje recibido:{' '}
+                                      {format.format(new Date(item.detail.messageAt))}
+                                    </p>
+                                  )}
+                                  <p>Atención manual en WhatsApp o YCloud.</p>
+                                </div>
+                              )}
                               {['imported', 'imported_history'].includes(item.kind) && (
                                 <div>
                                   <p>

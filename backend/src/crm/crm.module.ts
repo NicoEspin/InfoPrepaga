@@ -14,6 +14,7 @@ import { ImportMappingController } from './import-mapping.controller';
 import { ImportMappingService } from './import-mapping.service';
 
 @Module({
+  exports: [CrmService],
   imports: [PrismaModule, UsersModule],
   controllers: [
     PipelineController,

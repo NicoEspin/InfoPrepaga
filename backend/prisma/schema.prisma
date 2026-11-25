@@ -8,6 +8,7 @@ datasource db {
 }
 
 model User {
+  ycloudRetries YCloudInboundRetry[]
   id            String            @id @default(uuid())
   email         String            @unique
   password      String
@@ -144,6 +145,7 @@ enum LeadIntakeMode {
 }
 
 model Lead {
+  ycloudEvents YCloudInboundEvent[]
   portfolioClass PortfolioClass @default(ACTIVE)
   intakeMode LeadIntakeMode @default(NEW)
   autoAssignmentEligible Boolean @default(true)
@@ -449,4 +451,62 @@ model LeadImportConfiguration {
   createdAt DateTime @default(now())
   @@unique([ownerId, fingerprint])
   @@map("lead_import_configurations")
+}
+
+enum YCloudInboundStatus {
+  PENDING
+  PROCESSED
+  IGNORED
+  REVIEW
+  EXHAUSTED
+}
+
+model YCloudInboundEvent {
+  id String @id @db.VarChar(160)
+  messageId String? @db.VarChar(160)
+  wamid String? @db.VarChar(256)
+  eventType String @db.VarChar(100)
+  apiVersion String @db.VarChar(32)
+  wabaId String? @db.VarChar(64)
+  businessPhone String? @db.VarChar(32)
+  messageType String? @db.VarChar(40)
+  phoneKey String? @db.VarChar(32)
+  profileName String? @db.VarChar(160)
+  externalUserId String? @db.VarChar(160)
+  emittedAt DateTime @db.Timestamptz(3)
+  messageAt DateTime? @db.Timestamptz(3)
+  receivedAt DateTime @default(now()) @db.Timestamptz(3)
+  attribution Json?
+  isTestMessage Boolean @default(false)
+  status YCloudInboundStatus @default(PENDING)
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now()) @db.Timestamptz(3)
+  errorCode String? @db.VarChar(64)
+  processedAt DateTime? @db.Timestamptz(3)
+  leadId String?
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  retries YCloudInboundRetry[]
+
+  @@unique([wabaId, messageId])
+  @@unique([wabaId, wamid])
+  @@index([status, nextAttemptAt, receivedAt, id])
+  @@index([phoneKey])
+  @@index([leadId])
+  @@map("ycloud_inbound_events")
+}
+
+model YCloudInboundRetry {
+  id String @id @default(uuid())
+  eventId String
+  event YCloudInboundEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  actorId String
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  previousStatus YCloudInboundStatus
+  previousErrorCode String?
+  previousAttempts Int
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([eventId, createdAt])
+  @@index([actorId])
+  @@map("ycloud_inbound_retries")
 }

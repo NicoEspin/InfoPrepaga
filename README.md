@@ -1,5 +1,7 @@
 # InfoPrepaga CRM
 
+Captación WhatsApp desde anuncios Meta: [configuración, prueba local con Quick Tunnel y aceptación de YCloud](docs/ycloud-integration.md). Integración preparada, deshabilitada por defecto; respuestas manuales. La excepción de mensajes comunes requiere remitentes autorizados y un despliegue de prueba aislado; en producción permanece apagada.
+
 Reportes y Pipeline: [contrato de cálculo, API, migración, permisos y descarga PDF local](docs/commercial-reports.md).
 
 Administración actual: [cuentas ADMIN/VENDEDOR, bajas restaurables y renovación automática de sesión](docs/accounts-and-sessions.md).

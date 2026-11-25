@@ -1,6 +1,53 @@
 import * as Joi from 'joi';
+import { parseYCloudTestSenders } from '../integrations/ycloud/ycloud-policy';
 
 export const envValidationSchema = Joi.object({
+  YCLOUD_ENABLED: Joi.string().valid('true', 'false').default('false'),
+  YCLOUD_ALLOW_NON_AD_TEST_MESSAGES: Joi.string()
+    .valid('true', 'false')
+    .default('false'),
+  YCLOUD_TEST_SENDERS: Joi.string()
+    .custom((value: string, helpers) => {
+      try {
+        parseYCloudTestSenders(value);
+        return value;
+      } catch {
+        return helpers.error('any.invalid');
+      }
+    })
+    .when('YCLOUD_ALLOW_NON_AD_TEST_MESSAGES', {
+      is: 'true',
+      then: Joi.string().trim().min(1).required(),
+      otherwise: Joi.allow(''),
+    }),
+  YCLOUD_WEBHOOK_SECRET: Joi.string()
+    .max(512)
+    .when('YCLOUD_ENABLED', {
+      is: 'true',
+      then: Joi.required(),
+      otherwise: Joi.allow(''),
+    }),
+  YCLOUD_WABA_ID: Joi.string()
+    .pattern(/^\d{1,64}$/)
+    .when('YCLOUD_ENABLED', {
+      is: 'true',
+      then: Joi.required(),
+      otherwise: Joi.allow(''),
+    }),
+  YCLOUD_BUSINESS_PHONE_NUMBER: Joi.string()
+    .pattern(/^\+[1-9]\d{6,14}$/)
+    .when('YCLOUD_ENABLED', {
+      is: 'true',
+      then: Joi.required(),
+      otherwise: Joi.allow(''),
+    }),
+  YCLOUD_LEAD_SOURCE_CODE: Joi.string()
+    .pattern(/^[A-Za-z0-9_-]{1,100}$/)
+    .when('YCLOUD_ENABLED', {
+      is: 'true',
+      then: Joi.required(),
+      otherwise: Joi.allow(''),
+    }),
   R2_ACCOUNT_ID: Joi.string()
     .pattern(/^[a-f0-9]{32}$/)
     .allow(''),

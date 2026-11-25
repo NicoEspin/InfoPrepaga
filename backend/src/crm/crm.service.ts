@@ -546,6 +546,32 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
     },
   ) {
     assertAdmin(actor);
+    return this.insertLead(tx, dto, actor.id, imported);
+  }
+  // Internal system entry point: callers must hold assignment_state first.
+  async createSystemLeadInTransaction(tx: Tx, dto: CreateLeadDto) {
+    return this.insertLead(tx, dto, null);
+  }
+  async backfillContactKeysInTransaction(tx: Tx) {
+    const leads = await tx.lead.findMany({
+      where: { contactKeysVersion: 0 },
+      take: 100,
+      orderBy: { id: 'asc' },
+      select: { id: true, email: true, phone: true },
+    });
+    for (const lead of leads)
+      await tx.lead.update({
+        where: { id: lead.id },
+        data: { ...contactKeys(lead.email, lead.phone), contactKeysVersion: 1 },
+      });
+    return leads.length;
+  }
+  private async insertLead(
+    tx: Tx,
+    dto: CreateLeadDto,
+    actorId: string | null,
+    imported?: Parameters<CrmService['createLeadInTransaction']>[3],
+  ) {
     await this.activeSource(tx, dto.sourceId);
     if (imported?.assignedToId)
       await this.manualResponsible(tx, imported.assignedToId);
@@ -583,11 +609,11 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
       },
       include: leadInclude,
     });
-    await this.activity(tx, lead.id, actor.id, 'registered', {
+    await this.activity(tx, lead.id, actorId, 'registered', {
       sourceId: dto.sourceId,
     });
     if (imported)
-      await this.activity(tx, lead.id, actor.id, 'imported', {
+      await this.activity(tx, lead.id, actorId, 'imported', {
         batchId: imported.batchId,
         sheet: imported.sheet,
         rowNumber: imported.rowNumber,

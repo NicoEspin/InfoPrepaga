@@ -110,3 +110,20 @@ Los resultados concretos de esta entrega y las limitaciones operativas se regist
 ## Reportes y Pipeline persistente
 
 Ver [contrato comercial v1](commercial-reports.md) para endpoints, selección histórica, asignación manual a ADMIN, fotografía inmutable, idempotencia y PDF sin R2. Las operaciones están documentadas en Swagger.
+
+## Integración YCloud
+
+Ver [guía operativa y contrato de captación](ycloud-integration.md). Migraciones `20261117120000_ycloud_inbound` y `20261119120000_ycloud_test_messages`, Prisma 6.19.3.
+
+| Método y ruta NestJS | Autenticación y respuesta |
+| --- | --- |
+| `POST /webhooks/ycloud` | Solo este método usa `@Public()` respecto de JWT; guard HMAC-SHA256 sobre rawBody, YCloud-Signature y ±300s. 128 KiB, JSON sin compresión, 600/min/IP/instancia. 200 accepted después del almacenamiento; 200 duplicate; 400 inválido, 401 firma, 403 cuenta, 413 tamaño, 415 contenido, 429 caudal, 503 pausado/almacenamiento. |
+| `GET /crm/integrations/ycloud/events` | JWT de sesión + ADMIN en guard y servicio. `page=1`, `pageSize=20` (máx.100), `status=PENDING/PROCESSED/IGNORED/REVIEW/EXHAUSTED`. `{enabled,allowNonAdTestMessages,items,total,page,pageSize}`; cada item incluye `isTestMessage`, sin datos de contacto ni lista de remitentes. |
+| `GET /crm/integrations/ycloud/events/:id` | JWT + ADMIN. Metadatos mínimos del ingreso y últimos 20 reintentos; 404 si no existe. |
+| `POST /crm/integrations/ycloud/events/:id/retry` | JWT + ADMIN. Sin datos de edición; encola REVIEW/EXHAUSTED y audita actor/estado/código/intentos previos. 200 `{result:"queued"}`; 409 para estados no reintentables y contacto insuficiente/versión incompatible. |
+
+El relay público Next.js conserva la ruta `/webhooks/ycloud` y los bytes de firma; no requiere sesión ni Origin de navegador. Las operaciones administrativas usan `/api/crm/integrations/ycloud/events...` con la sesión y comprobación de Origin habituales del BFF. VENDEDOR no puede consultar ni reprocesar inbox. El historial YCloud de cada lead sí sigue el alcance comercial ya existente.
+
+Los ingresos se procesan después del HTTP en PostgreSQL y comparten el bloqueo de reparto. No cambian reportes, fechas ni atribución inicial de contactos vinculados. No hay automatización de respuestas ni integración con Avalian.
+
+La excepción `YCLOUD_ALLOW_NON_AD_TEST_MESSAGES` es configuración privada del despliegue, apagada por defecto; requiere `YCLOUD_TEST_SENDERS` válido. No hay toggle público ni argumento de webhook para habilitarla. `isTestMessage` se guarda en inbox, detalle ADMIN y actividad; no reemplaza referral. El worker vuelve a autorizar cada intento y descarta pendientes orgánicos al deshabilitar la excepción, conservando confirmados e idempotencia. El Compose principal fuerza política productiva; el override local explícito habilita pruebas con base aislada.
