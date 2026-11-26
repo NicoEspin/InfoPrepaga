@@ -134,6 +134,8 @@ El harness usa el frontend standalone construido y un servidor de desarrollo en 
 
 ## Docker y despliegue posterior
 
+Para actualizar el CRM de producción desde Windows con un solo comando, seguí la [guía de despliegue en el VPS](docs/deploy-vps.md).
+
 `compose.yaml` prepara PostgreSQL, migraciones, API y frontend. Requiere un `.env` raíz propio, basado en `.env.example`, con credenciales únicas. La URL de la base debe usar el host `postgres` y coincidir con `POSTGRES_*`. Nunca publicar esos valores.
 
 ```powershell
