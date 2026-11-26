@@ -59,7 +59,7 @@ Crear el primer ADMIN mediante el bootstrap existente, solo en esta base nueva:
 
 ```powershell
 $env:SEED_ADMIN_EMAIL = Read-Host 'Correo del ADMIN de prueba'
-$bootstrapPassword = Read-Host 'Contraseña exclusiva de prueba (mínimo 12 caracteres)' -AsSecureString
+$bootstrapPassword = Read-Host 'Contraseña exclusiva de prueba (mínimo 8 caracteres)' -AsSecureString
 $env:SEED_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', $bootstrapPassword).Password
 try { dc run --rm -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD migrate pnpm prisma:seed }
 finally {

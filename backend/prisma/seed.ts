@@ -17,9 +17,9 @@ async function main() {
     throw new Error('Provide both bootstrap variables');
   if (
     password &&
-    (Buffer.byteLength(password, 'utf8') > 72 || password.length < 12)
+    (Buffer.byteLength(password, 'utf8') > 72 || password.length < 8)
   ) {
-    throw new Error('Use at least 12 characters and at most 72 UTF-8 bytes');
+    throw new Error('Use at least 8 characters and at most 72 UTF-8 bytes');
   }
   const hash = password ? await bcrypt.hash(password, 12) : undefined;
   await prisma.$transaction(async (tx) => {

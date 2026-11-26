@@ -35,9 +35,9 @@ export class CreateUserDto {
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )
   email!: string;
-  @ApiProperty()
+  @ApiProperty({ minLength: 8 })
   @IsString()
-  @MinLength(12)
+  @MinLength(8)
   @IsByteLength(0, 72)
   password!: string;
   @ApiProperty({ enum: ['ADMIN', 'VENDEDOR'] })
@@ -53,10 +53,10 @@ export class EditUserDto extends PartialType(CreateUserDto, {
 export class AccountActionDto {
   @ApiProperty() @IsInt() @Min(1) version!: number;
   @ApiPropertyOptional() @IsOptional() @IsUUID() replacementId?: string;
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ minLength: 8 })
   @IsOptional()
   @IsString()
-  @MinLength(12)
+  @MinLength(8)
   @IsByteLength(0, 72)
   password?: string;
 }

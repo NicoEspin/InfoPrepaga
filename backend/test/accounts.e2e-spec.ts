@@ -100,6 +100,73 @@ suite('Account lifecycle and session races', () => {
     if (db) await db.$disconnect();
   });
 
+  it('accepts eight-character passwords for registration, creation, editing and restoration', async () => {
+    const email = `${randomUUID()}@example.test`;
+    const values = { firstName: 'Prueba', email, role: 'VENDEDOR' };
+    await api()
+      .post('/users')
+      .set(auth())
+      .send({ ...values, password: 'Abc1234' })
+      .expect(400);
+    const created = await api()
+      .post('/users')
+      .set(auth())
+      .send({ ...values, password: 'Abc12345' })
+      .expect(201);
+    const id = (created.body as { id: string }).id;
+    await api()
+      .post('/auth/login')
+      .send({ email, password: 'Abc12345' })
+      .expect(200);
+    await api()
+      .patch(`/users/${id}`)
+      .set(auth())
+      .send({ version: 1, password: 'Def1234' })
+      .expect(400);
+    await api()
+      .patch(`/users/${id}`)
+      .set(auth())
+      .send({ version: 1, password: 'Def12345' })
+      .expect(200);
+    await api()
+      .post('/auth/login')
+      .send({ email, password: 'Def12345' })
+      .expect(200);
+    await api()
+      .post(`/users/${id}/delete`)
+      .set(auth())
+      .send({ version: 2 })
+      .expect(201);
+    await api()
+      .post(`/users/${id}/restore`)
+      .set(auth())
+      .send({ version: 3, password: 'Ghi1234' })
+      .expect(400);
+    await api()
+      .post(`/users/${id}/restore`)
+      .set(auth())
+      .send({ version: 3, password: 'Ghi12345' })
+      .expect(201);
+    await api()
+      .post('/auth/login')
+      .send({ email, password: 'Ghi12345' })
+      .expect(200);
+    const registration = {
+      email: `${randomUUID()}@example.test`,
+      firstName: 'Prueba',
+    };
+    await api()
+      .post('/auth/register')
+      .set(auth())
+      .send({ ...registration, password: 'Abc1234' })
+      .expect(400);
+    await api()
+      .post('/auth/register')
+      .set(auth())
+      .send({ ...registration, password: 'Abc12345' })
+      .expect(201);
+  });
+
   it('blocks incompatible legacy roles and normalized-email collisions before migration writes', async () => {
     // Execute only the trusted migration preflight inside rolled-back test transactions.
     const preflight = readFileSync(

@@ -81,7 +81,7 @@ Para una base local con Docker puede usarse `pnpm db:up` dentro de `backend/`, t
 
 ## Primer administrador
 
-No existen credenciales predeterminadas ni registro público. Sobre una base nueva, ejecutar el seed explícitamente con `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD` definidos en el entorno local. La contraseña debe tener al menos 12 caracteres y como máximo 72 bytes UTF-8. El seed crea `ADMIN`, `VENDEDOR` y permisos administrativos; no restablece contraseñas ni modifica usuarios existentes. Después, retirar las variables de bootstrap del entorno.
+No existen credenciales predeterminadas ni registro público. Sobre una base nueva, ejecutar el seed explícitamente con `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD` definidos en el entorno local. La contraseña debe tener al menos 8 caracteres y como máximo 72 bytes UTF-8. El seed crea `ADMIN`, `VENDEDOR` y permisos administrativos; no restablece contraseñas ni modifica usuarios existentes. Después, retirar las variables de bootstrap del entorno.
 
 Para probar el CRM con cuentas y contactos sintéticos, usá la [seed demo y su recorrido de pruebas](docs/seed-demo.md).
 

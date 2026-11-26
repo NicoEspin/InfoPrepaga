@@ -29,7 +29,7 @@ La importación administrativa de Excel, revisión de duplicados y carga reanuda
 | `POST /crm/tasks` | Campos de tarea; lead o contacto independiente | Según ámbito |
 | `PATCH /crm/tasks/:id` | Campos editables + `version`; `completed:true/false` completa/reabre | Según ámbito |
 
-La identidad se consulta mediante `GET /users/me` y el BFF `GET /api/crm/session`. La creación de vendedores conserva `POST /auth/register` restringido a ADMIN; `POST /api/crm/users` lo intermedia y devuelve solo el usuario seguro, sin tokens. Las nuevas contraseñas requieren al menos 12 caracteres y como máximo 72 bytes UTF-8; no se modifican contraseñas existentes. Nombre y apellido admiten hasta 50 caracteres.
+La identidad se consulta mediante `GET /users/me` y el BFF `GET /api/crm/session`. La creación de vendedores conserva `POST /auth/register` restringido a ADMIN; `POST /api/crm/users` lo intermedia y devuelve solo el usuario seguro, sin tokens. Las nuevas contraseñas requieren al menos 8 caracteres y como máximo 72 bytes UTF-8; no se modifican contraseñas existentes. Nombre y apellido admiten hasta 50 caracteres.
 
 Paginación: `page` desde 1, `pageSize` de 1–100, por defecto 20. Respuesta `{items,total,page,pageSize}`. UUIDs para entidades, fechas ISO 8601 y `version` entero positivo. Campos desconocidos o `null` en campos no anulables devuelven 400. Para borrar un contacto opcional se puede enviar cadena vacía; siempre debe quedar teléfono o correo.
 

@@ -335,13 +335,13 @@ function AccountEditor({
                     <f.TextField
                       label={
                         mode === 'create'
-                          ? 'Contraseña (mínimo 12 caracteres)'
-                          : 'Nueva contraseña (opcional)'
+                          ? 'Contraseña (mínimo 8 caracteres)'
+                          : 'Nueva contraseña (opcional, mínimo 8 caracteres)'
                       }
                       type='password'
                       autoComplete='new-password'
                       required={mode === 'create'}
-                      minLength={12}
+                      minLength={8}
                       maxLength={72}
                     />
                   )}

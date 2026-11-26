@@ -4,7 +4,7 @@ Solo ADMIN puede acceder a **Administrador → Usuarios** (`/settings`). Permite
 
 ## Uso
 
-1. Crear usuario con nombre, correo, contraseña y un único rol. Apellido es opcional. La contraseña requiere al menos 12 caracteres y hasta 72 bytes UTF-8. Crear no inicia una sesión de la cuenta nueva.
+1. Crear usuario con nombre, correo, contraseña y un único rol. Apellido es opcional. La contraseña requiere al menos 8 caracteres y hasta 72 bytes UTF-8. Crear no inicia una sesión de la cuenta nueva.
 2. Editar permite dejar la contraseña vacía para conservarla. Las contraseñas existentes nunca se muestran. Cambiar correo, contraseña o rol cierra todas las sesiones de esa cuenta.
 3. Al eliminar, desactivar o cambiar de rol una cuenta con leads o tareas pendientes, elegir un vendedor activo de reemplazo. Puede tener el reparto pausado. Se transfieren también tareas independientes; tareas completadas y autores conservan su historia.
 4. El filtro Eliminadas permite restaurar cuentas. Recuperan el acceso y conservan su rol, con recepción pausada y sin recuperar cartera transferida. Se puede establecer una contraseña nueva.
