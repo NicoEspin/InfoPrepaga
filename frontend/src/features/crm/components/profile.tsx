@@ -47,6 +47,7 @@ const format = new Intl.DateTimeFormat('es-AR', {
 });
 const titles: Record<string, string> = {
   registered: 'Lead creado',
+  'landing-inquiry': 'Solicitud de cotización web',
   'ycloud-inbound': 'Ingreso por WhatsApp · YCloud',
   imported: 'Importación Excel',
   imported_history: 'Historia incorporada desde Excel',
@@ -380,6 +381,43 @@ export function CommercialProfileModal({
                                   ? 'Sistema'
                                   : personName(item.actor)}
                               </p>
+                              {item.kind === 'landing-inquiry' && (
+                                <div>
+                                  <p>
+                                    {String(item.detail.contactName ?? '')} ·{' '}
+                                    {String(item.detail.contactPhone ?? '')} ·{' '}
+                                    {String(item.detail.contactEmail ?? '')}
+                                  </p>
+                                  <p>
+                                    {item.detail.source === 'LANDING_IP'
+                                      ? 'InfoPrepaga'
+                                      : 'Coberturas Médicas'}
+                                    {' · Formulario '}
+                                    {String(item.detail.formId ?? '')}
+                                  </p>
+                                  <p>
+                                    Autorización registrada · Aviso{' '}
+                                    {String(item.detail.privacyVersion ?? '')}
+                                  </p>
+                                  <p>
+                                    Situación laboral: {String(item.detail.employment ?? '')}
+                                    {item.detail.age != null &&
+                                      ` · Edad: ${String(item.detail.age)}`}
+                                    {item.detail.group != null &&
+                                      ` · Grupo: ${String(item.detail.group)}`}
+                                    {item.detail.plan != null &&
+                                      ` · Plan: ${String(item.detail.plan)}`}
+                                    {item.detail.budget != null &&
+                                      ` · Presupuesto: ${String(item.detail.budget)}`}
+                                  </p>
+                                  {item.detail.needsReview === true && (
+                                    <p>
+                                      Revisión administrativa pendiente: coincidencias de contacto
+                                      ambiguas. No se fusionaron fichas.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                               {item.kind === 'ycloud-inbound' && (
                                 <div>
                                   <p>

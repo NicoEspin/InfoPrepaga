@@ -51,6 +51,12 @@ La FK de adjuntos restringe eliminar directamente un lead con archivos asociados
 
 ## Verificación
 
+### Diagnóstico de errores de almacenamiento
+
+Si una carga o eliminación devuelve 503, consultar los logs del servicio `api` buscando `r2-operation-failed`. El evento registra la operación, duración en milisegundos, estado HTTP del proveedor y códigos técnicos conocidos. Por ejemplo, `AccessDenied` con HTTP 403 indica rechazo de acceso; `AbortError` cerca de 6000 ms indica que se alcanzó el límite de la operación; `ENOTFOUND` indica un problema de resolución DNS. No registra mensajes originales, credenciales, nombres de archivos, claves de objetos ni contenido. Los códigos no reconocidos se muestran como `UnknownError`.
+
+Estos diagnósticos requieren desplegar la versión que los incorpora y reproducir el fallo. Las pruebas simuladas no confirman la conectividad ni los permisos del bucket de producción.
+
 `backend/test/attachments.e2e-spec.ts` aplica todas las migraciones a un esquema nuevo de `localhost/starter_test`, prueba sesiones reales, CRUD, aislamiento entre vendedores, reasignación, validación y recuperación ante errores. R2 se sustituye por un almacenamiento simulado para no necesitar credenciales ni transferir datos. `backend/src/crm/r2.service.spec.ts` verifica la configuración ausente y firmas de descarga sin red. La conectividad con el bucket real debe verificarse después de configurar el entorno.
 
 Verificación del 3 de noviembre de 2026:

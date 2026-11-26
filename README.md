@@ -1,5 +1,7 @@
 # InfoPrepaga CRM
 
+Captación desde landings: [guía independiente de InfoPrepaga](docs/integracion-landing-infoprepaga.md) y [guía independiente de Coberturas Médicas](docs/integracion-landing-coberturas-medicas.md). Endpoints de servidor con credenciales exclusivas, recibos transaccionales e idempotencia; deshabilitados hasta aprobar responsable legal y accesos. [Verificación y límites](docs/verificacion-captacion-landings.md).
+
 Captación WhatsApp desde anuncios Meta: [configuración, prueba local con Quick Tunnel y aceptación de YCloud](docs/ycloud-integration.md). Integración preparada, deshabilitada por defecto; respuestas manuales. La excepción de mensajes comunes requiere remitentes autorizados y un despliegue de prueba aislado; en producción permanece apagada.
 
 Reportes y Pipeline: [contrato de cálculo, API, migración, permisos y descarga PDF local](docs/commercial-reports.md).

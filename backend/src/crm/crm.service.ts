@@ -333,7 +333,16 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
         portfolioClass: query.portfolioClass ?? 'ACTIVE',
       }),
       ...(query.status && { status: query.status }),
-      ...(query.sourceId && { sourceId: query.sourceId }),
+      ...(query.sourceId && {
+        AND: [
+          {
+            OR: [
+              { sourceId: query.sourceId },
+              { landingSubmissions: { some: { sourceId: query.sourceId } } },
+            ],
+          },
+        ],
+      }),
       ...(query.assignedToId && { assignedToId: query.assignedToId }),
       ...(query.q?.trim() && {
         OR: ['name', 'email', 'phone', 'company'].map((key) => ({

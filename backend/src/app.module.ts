@@ -18,6 +18,7 @@ import { UsersModule } from './users/users.module';
 import { ReportsModule } from './reports/reports.module';
 import { CrmModule } from './crm/crm.module';
 import { YCloudModule } from './integrations/ycloud/ycloud.module';
+import { LandingModule } from './integrations/landings/landing.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { YCloudModule } from './integrations/ycloud/ycloud.module';
     UsersModule,
     CrmModule,
     YCloudModule,
+    LandingModule,
     ReportsModule,
     RolesModule,
     PermissionsModule,

@@ -118,6 +118,7 @@ enum TaskPriority {
 }
 
 model LeadSource {
+  landingSubmissions LandingSubmission[]
   importMappings LeadImportMapping[]
   importAppearances LeadImportAppearance[]
   id        String   @id @default(uuid())
@@ -145,6 +146,7 @@ enum LeadIntakeMode {
 }
 
 model Lead {
+  landingSubmissions LandingSubmission[]
   ycloudEvents YCloudInboundEvent[]
   portfolioClass PortfolioClass @default(ACTIVE)
   intakeMode LeadIntakeMode @default(NEW)
@@ -191,6 +193,31 @@ model Lead {
   @@index([emailKey])
   @@index([phoneKey])
   @@map("leads")
+}
+
+// One consultation per authenticated landing and stable submission ID.
+// The contact's historical source remains on Lead; every new inquiry has its own.
+model LandingSubmission {
+  id String @id @default(uuid())
+  landing String @db.VarChar(32)
+  submissionId String @db.VarChar(36)
+  requestHash String @db.VarChar(64)
+  controllerId String @db.VarChar(100)
+  formId String @db.VarChar(16)
+  privacyVersion String @db.VarChar(64)
+  consent Boolean
+  receivedAt DateTime @default(now()) @db.Timestamptz(3)
+  payload Json
+  needsReview Boolean @default(false)
+  leadId String
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  sourceId String
+  source LeadSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+
+  @@unique([landing, submissionId])
+  @@index([leadId, receivedAt])
+  @@index([sourceId, receivedAt])
+  @@map("landing_submissions")
 }
 
 model LeadImportBatch {
