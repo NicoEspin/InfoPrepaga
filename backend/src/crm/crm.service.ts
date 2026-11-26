@@ -154,9 +154,9 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
       where: {
         isActive: true,
         receivesLeads: true,
+        deletedAt: null,
         roles: {
-          some: { role: { name: 'VENDEDOR' } },
-          none: { role: { name: 'ADMIN' } },
+          some: { role: { name: { in: ['ADMIN', 'VENDEDOR'] } } },
         },
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -259,6 +259,7 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
   async users(actor: AuthenticatedUser) {
     assertAdmin(actor);
     return this.prisma.user.findMany({
+      where: { deletedAt: null },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
         ...userSelect,
@@ -296,12 +297,10 @@ export class CrmService implements OnModuleInit, OnModuleDestroy {
       });
       if (!target || target.deletedAt || !target.isActive)
         throw new NotFoundException('Usuario activo no encontrado');
-      if (target.roles.some((r) => r.role.name === 'ADMIN'))
-        throw new BadRequestException(
-          'Esta configuración se aplica solo a vendedores',
-        );
-      if (!target.roles.some((r) => r.role.name === 'VENDEDOR'))
-        throw new BadRequestException('El usuario no es vendedor');
+      if (
+        !target.roles.some((r) => ['ADMIN', 'VENDEDOR'].includes(r.role.name))
+      )
+        throw new BadRequestException('El usuario no tiene un rol comercial');
       await tx.user.update({
         where: { id },
         data: { ...dto, version: { increment: 1 } },

@@ -4,6 +4,7 @@ import { Accounts } from '@/features/accounts/components/accounts';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { CrmContent } from '@/components/layout/crm-content';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { LoadingButton } from '@/components/ui/loading-button';
 import { FieldGroup } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,13 +28,17 @@ export function CommercialSettings({ actor }: { actor: Identity }) {
   const catalogs = useCrmQuery<Catalogs>(user.id, 'catalogs', admin);
   const action = useAction();
   const refresh = useRefreshCrm();
+  const sellers =
+    users.data?.filter((seller) =>
+      seller.roles.some((role) => ['ADMIN', 'VENDEDOR'].includes(role.role.name))
+    ) ?? [];
   if (!admin) return <p>Acceso restringido.</p>;
   return (
     <CrmContent>
       <div className='leads-content'>
         <div className='leads-heading'>
           <h1>Administrador</h1>
-          <p>Vendedores, reparto automático y bases de origen.</p>
+          <p>Usuarios, reparto automático y bases de origen.</p>
         </div>
         <Feedback
           error={identity.error ?? users.error ?? catalogs.error}
@@ -58,58 +63,66 @@ export function CommercialSettings({ actor }: { actor: Identity }) {
           <TabsContent value='allocation'>
             <Card>
               <CardHeader>
-                <CardTitle>Vendedores y reparto</CardTitle>
+                <CardTitle>Equipo comercial y reparto</CardTitle>
               </CardHeader>
               <CardContent>
                 <p>
-                  La rotación usa vendedores activos con recepción habilitada. Al reactivar se
-                  distribuyen los pendientes por antigüedad.
+                  La rotación incluye administradores y vendedores activos con recepción habilitada.
+                  Al reactivar se distribuyen los pendientes por antigüedad.
                 </p>
-                {users.isPending && <LoadingState label='Cargando vendedores…' rows={2} />}
-                {users.isSuccess &&
-                  !users.data.some(
-                    (seller) =>
-                      seller.isActive && seller.roles.some((role) => role.role.name === 'VENDEDOR')
-                  ) && (
-                    <EmptyState
-                      title='Todavía no hay vendedores'
-                      description='Creá una cuenta y habilitá su recepción para incorporarla al reparto.'
-                    />
-                  )}
+                {users.isPending && <LoadingState label='Cargando equipo comercial…' rows={2} />}
+                {users.isSuccess && sellers.length === 0 && (
+                  <EmptyState
+                    title='Todavía no hay usuarios para el reparto'
+                    description='Creá una cuenta de administrador o vendedor desde Usuarios para incorporarla al reparto.'
+                  />
+                )}
                 <ul className='grid gap-3 pt-3'>
-                  {users.data
-                    ?.filter(
-                      (seller) =>
-                        seller.isActive &&
-                        seller.roles.some((role) => role.role.name === 'VENDEDOR')
-                    )
-                    .map((seller) => (
-                      <li key={seller.id} className='border-border rounded-lg border p-3'>
-                        <strong>{personName(seller)}</strong>
-                        <p>{seller.email}</p>
-                        <p>
-                          {seller.isActive ? 'Cuenta activa' : 'Cuenta inactiva'} ·{' '}
-                          {seller.receivesLeads ? 'Recepción habilitada' : 'Recepción pausada'}
-                        </p>
-                        <div className='flex flex-wrap gap-2 pt-2'>
-                          <Button
-                            size='sm'
-                            disabled={action.pending}
-                            onClick={() =>
-                              void action.run(async () => {
+                  {sellers.map((seller) => (
+                    <li key={seller.id} className='border-border rounded-lg border p-3'>
+                      <strong>{personName(seller)}</strong>
+                      <p>{seller.email}</p>
+                      <p>
+                        {seller.roles.some((role) => role.role.name === 'ADMIN')
+                          ? 'Administrador'
+                          : 'Vendedor'}
+                      </p>
+                      <p>
+                        {seller.isActive ? 'Cuenta activa' : 'Cuenta inactiva'} ·{' '}
+                        {seller.isActive && seller.receivesLeads
+                          ? 'Recepción habilitada'
+                          : 'Recepción pausada'}
+                      </p>
+                      <div className='flex flex-wrap items-center gap-3 pt-2'>
+                        <Switch
+                          id={`receives-leads-${seller.id}`}
+                          checked={seller.isActive && seller.receivesLeads}
+                          disabled={action.pending || !seller.isActive}
+                          aria-label={`Recibir leads: ${personName(seller)}`}
+                          onCheckedChange={(receivesLeads) =>
+                            void action.run(
+                              async () => {
                                 await crmRequest(`users/${seller.id}`, {
                                   method: 'PATCH',
-                                  body: JSON.stringify({ receivesLeads: !seller.receivesLeads })
+                                  body: JSON.stringify({ receivesLeads })
                                 });
                                 await refresh();
-                              })
-                            }
-                          >
-                            {seller.receivesLeads ? 'Pausar recepción' : 'Habilitar recepción'}
-                          </Button>
-                        </div>
-                      </li>
-                    ))}
+                              },
+                              receivesLeads
+                                ? 'Recepción de leads habilitada.'
+                                : 'Recepción de leads pausada.'
+                            )
+                          }
+                        />
+                        <label htmlFor={`receives-leads-${seller.id}`}>Recibir leads</label>
+                      </div>
+                      {!seller.isActive && (
+                        <p className='text-muted-foreground pt-2 text-sm'>
+                          Reactivá la cuenta desde Usuarios para habilitar su recepción.
+                        </p>
+                      )}
+                    </li>
+                  ))}
                 </ul>
               </CardContent>
             </Card>

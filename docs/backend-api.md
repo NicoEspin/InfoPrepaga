@@ -16,7 +16,7 @@ La importación administrativa de Excel, revisión de duplicados y carga reanuda
 | `POST /crm/sources` | `{name}` → origen de tipo Base | ADMIN |
 | `PATCH /crm/sources/:id` | `{isActive}`; solo bases configurables | ADMIN |
 | `GET /crm/users` | Identidad mínima, roles, `isActive`, `receivesLeads`; nunca contraseña/tokens | ADMIN |
-| `PATCH /crm/users/:id` | `{isActive?,receivesLeads?}`; configuración de vendedores | ADMIN |
+| `PATCH /crm/users/:id` | `{isActive?,receivesLeads?}`; recepción de administradores y vendedores; acceso y recepción se modifican por separado | ADMIN |
 | `GET /crm/leads` | Página de leads con origen y responsable | Según asignación |
 | `POST /crm/leads` | `{name,sourceId,email?,phone?,company?,observations?}` → lead asignado o pendiente | ADMIN |
 | `GET /crm/leads/:id` | Lead con `nextActivity` o `null` | Según asignación |

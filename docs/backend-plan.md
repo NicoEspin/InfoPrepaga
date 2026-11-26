@@ -29,11 +29,11 @@ Las tareas vinculadas siguen al responsable actual del lead, incluso si ya está
 
 La migración crea una fila única `assignment_state.id=1`. Las escrituras comerciales que dependen de permisos o asignación bloquean esa fila con `SELECT FOR UPDATE` dentro de la transacción. El reparto, la reasignación y las operaciones de notas/tareas no pueden intercalarse entre autorización y escritura.
 
-El orden de candidatos es `(createdAt, id)`; el último turno se conserva como valor, sin eliminarlo cuando se pausa una cuenta. ADMIN no entra al reparto. La reasignación manual no consume turnos ni requiere habilitar la recepción del destinatario, pero sí una cuenta VENDEDOR activa.
+El orden de candidatos es `(createdAt, id)`; el último turno se conserva como valor, sin eliminarlo cuando se pausa una cuenta. ADMIN y VENDEDOR participan del reparto si su cuenta está activa, no eliminada y tiene recepción habilitada. Solo ADMIN puede modificar esta recepción desde Reparto. La reasignación manual no consume turnos ni requiere habilitar la recepción del destinatario, pero sí una cuenta VENDEDOR activa.
 
-Los cambios de rol del endpoint administrativo existente comparten el bloqueo y pausan la recepción; volver a un rol VENDEDOR requiere habilitarla nuevamente.
+Los cambios de rol del endpoint administrativo existente comparten el bloqueo y pausan la recepción; volver a participar del reparto requiere habilitarla nuevamente.
 
-Los pendientes se procesan por `(createdAt, id)` en lotes de 50. El backend revisa al iniciar, cada 30 segundos y al cambiar la configuración de vendedores. Si quedan pendientes, las nuevas altas esperan también el reparto para no adelantarse. No hay Redis ni cola externa; varias instancias se coordinan con el bloqueo PostgreSQL. Los fallos se registran sin datos personales y se reintentan en la siguiente revisión.
+Los pendientes se procesan por `(createdAt, id)` en lotes de 50. El backend revisa al iniciar, cada 30 segundos y al cambiar la configuración de recepción del equipo comercial. Si quedan pendientes, las nuevas altas esperan también el reparto para no adelantarse. No hay Redis ni cola externa; varias instancias se coordinan con el bloqueo PostgreSQL. Los fallos se registran sin datos personales y se reintentan en la siguiente revisión.
 
 `version` protege ediciones, cambios de estado, reasignaciones y tareas. Una versión obsoleta devuelve 409. Las notas también incrementan la versión del lead. Cada escritura de lead y su evento de historial se confirman juntas. No se implementó eliminación definitiva.
 

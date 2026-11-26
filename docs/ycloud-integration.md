@@ -229,7 +229,7 @@ Antes de resolver contactos, el worker completa claves legacy con el backfill co
 | Una HISTORICAL o UNCLASSIFIED | REVIEW / CONTACT_HISTORICAL. No reactiva ni crea captación nueva. |
 | Contacto insuficiente | REVIEW / CONTACT_INSUFFICIENT. No fusiona por nombre ni user ID. |
 
-Los nuevos usan nombre de perfil válido de hasta 160 caracteres; si falta o es inválido, `WhatsApp ` y los últimos cuatro dígitos. La creación comparte validación de origen y reparto de CrmService. Mantiene prioridad de pendientes previos, vendedores activos con recepción habilitada, exclusión de ADMIN y recuperación sin candidatos. Sin vendedor queda sin asignar y privado de ADMIN hasta distribuirse.
+Los nuevos usan nombre de perfil válido de hasta 160 caracteres; si falta o es inválido, `WhatsApp ` y los últimos cuatro dígitos. La creación comparte validación de origen y reparto de CrmService. Mantiene prioridad de pendientes previos, administradores y vendedores activos con recepción habilitada y recuperación sin candidatos. Sin vendedor queda sin asignar y privado de ADMIN hasta distribuirse.
 
 No se usa un usuario administrador técnico. Las actividades `registered`, `assigned` e `ycloud-inbound` usan `actorId=null`: el perfil las muestra como Sistema. La actividad YCloud muestra si creó o vinculó, ID de anuncio y fecha del mensaje, sin exponer contenido de conversación. El historial conserva los permisos habituales del lead y el polling comercial existente refresca los datos.
 

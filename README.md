@@ -8,7 +8,7 @@ Administración actual: [cuentas ADMIN/VENDEDOR, bajas restaurables y renovació
 
 Mejoras de experiencia de uso: [cargas, guardados, errores y recuperación](docs/frontend-feedback.md).
 
-Leads, perfil, notas y Seguimientos ya tienen persistencia en NestJS/PostgreSQL. ADMIN administra toda la cartera, vendedores y bases; VENDEDOR gestiona únicamente sus asignados. El reparto usa una rotación transaccional entre vendedores activos habilitados y recupera pendientes al reactivarlos o reiniciar el backend.
+Leads, perfil, notas y Seguimientos ya tienen persistencia en NestJS/PostgreSQL. ADMIN administra toda la cartera, vendedores y bases; VENDEDOR gestiona únicamente sus asignados. El reparto usa una rotación transaccional entre administradores y vendedores activos habilitados y recupera pendientes al reactivarlos o reiniciar el backend.
 
 Documentación actual: [decisiones e implementación](docs/backend-plan.md), [contratos, migraciones y pruebas](docs/backend-api.md), [deuda técnica y próximas etapas](docs/technical-debt.md). Antes de iniciar esta versión, revisar la base de desarrollo y aplicar la nueva migración con `pnpm -C backend prisma:deploy`. No se aplicaron migraciones a la base configurada del propietario: la verificación usa exclusivamente una base descartable.
 
@@ -44,6 +44,8 @@ La **cartera Avalian** tiene una vista previa independiente en `/avalian`, restr
 Las rutas `/leads`, `/pipeline`, `/followups` y `/avalian` comparten ahora la sidebar, cabecera, controles de sesión del dashboard original. Conservan sus URLs y funcionalidades de demo. Los estilos del contenido y del perfil de lead heredan el tema activo, incluido el modo oscuro; la navegación independiente de InfoPrepaga fue retirada.
 
 </details>
+
+Al abrir `/`, el CRM redirige a `/leads`: las sesiones activas ingresan directamente y las personas sin sesión pasan al acceso existente. En Administrador → Reparto, el administrador puede encender o pausar **Recibir leads** por administrador o vendedor. Las cuentas inactivas muestran el control bloqueado y las eliminadas quedan fuera del listado. Pausar la recepción conserva los leads ya asignados; reactivarla retoma el reparto de pendientes por antigüedad.
 
 ## Arranque local
 

@@ -660,4 +660,71 @@ suite('Commercial API with real PostgreSQL and sessions', () => {
         .assignedToId,
     ).toBe(sellerBId);
   });
+  it('includes admins in allocation only while reception is enabled', async () => {
+    await db.user.updateMany({ data: { receivesLeads: false } });
+    const create = async (name: string) =>
+      (
+        await api()
+          .post('/crm/leads')
+          .set(auth(admin))
+          .send({ name, phone: 'Sintético admin', sourceId })
+          .expect(201)
+      ).body as Lead;
+    const pending = await create('Pendiente para administrador');
+    expect(pending.assignedToId).toBeNull();
+    await api()
+      .patch(`/crm/users/${adminId}`)
+      .set(auth(admin))
+      .send({ receivesLeads: true })
+      .expect(200);
+    expect(
+      (await db.lead.findUniqueOrThrow({ where: { id: pending.id } }))
+        .assignedToId,
+    ).toBe(adminId);
+    const assigned = await create('Nuevo para administrador');
+    expect(assigned.assignedToId).toBe(adminId);
+    await api()
+      .patch(`/crm/users/${sellerBId}`)
+      .set(auth(admin))
+      .send({ receivesLeads: true })
+      .expect(200);
+    expect((await create('Turno compartido vendedor')).assignedToId).toBe(
+      sellerBId,
+    );
+    expect((await create('Turno compartido administrador')).assignedToId).toBe(
+      adminId,
+    );
+    await api()
+      .patch(`/crm/users/${sellerBId}`)
+      .set(auth(admin))
+      .send({ receivesLeads: false })
+      .expect(200);
+
+    await api()
+      .patch(`/crm/users/${adminId}`)
+      .set(auth(admin))
+      .send({ receivesLeads: false })
+      .expect(200);
+    expect(
+      (await create('Pendiente con administrador pausado')).assignedToId,
+    ).toBeNull();
+    expect(
+      (await db.lead.findUniqueOrThrow({ where: { id: assigned.id } }))
+        .assignedToId,
+    ).toBe(adminId);
+    const login = await api()
+      .post('/auth/login')
+      .send({ email: 'b@example.com', password })
+      .expect(200);
+    const vendorToken = (login.body as { accessToken: string }).accessToken;
+    await api()
+      .patch(`/crm/users/${adminId}`)
+      .set(auth(vendorToken))
+      .send({ receivesLeads: true })
+      .expect(403);
+    expect(
+      (await db.user.findUniqueOrThrow({ where: { id: adminId } }))
+        .receivesLeads,
+    ).toBe(false);
+  });
 });
